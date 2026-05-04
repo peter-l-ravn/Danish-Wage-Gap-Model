@@ -24,30 +24,40 @@ class ModelClass(EconModelClass):
         par = self.par
 
         par.T = 20
+        par.T_shock = 10
+
+        par.T_max = 200
+
+        par.tol = 1e-6
 
         par.A = 1.0
 
         par.N_y = 1
 
-        par.alpha = 0.5
+        par.alpha = 0.6
 
         par.theta_l_y = 1.0
         par.theta_h_y = 1.4
-        par.theta_l_o = 1.0
+        par.theta_l_o = 1.1
         par.theta_h_o = 1.6
 
         par.mu_y = 1.2
         par.mu_o = 1.2
 
-        par.rho_h = 0.8
-        par.rho_l = 0.8
+        par.rho_h = 0.6
+        par.rho_l = 0.5
 
-        par.c = 0.4
+        par.c = 0.7
 
         par.l_h_o_init = 0.2
         par.l_l_o_init = 0.45
         par.wage_h_o_init = 0.5
         par.wage_l_o_init = 0.4
+
+        par.l_h_o_ss = np.inf
+        par.l_l_o_ss = np.inf
+        par.wage_h_o_ss = np.inf
+        par.wage_l_o_ss = np.inf
 
 
     def allocate(self):
@@ -58,21 +68,55 @@ class ModelClass(EconModelClass):
         sol = self.sol
         sim = self.sim
 
-        sol.l_h_y = np.empty(par.T)
-        sol.l_l_y = np.empty(par.T)
-        sol.l_h_o = np.empty(par.T)
-        sol.l_l_o = np.empty(par.T)
+        sol.l_h_y = np.empty(par.T_max)
+        sol.l_l_y = np.empty(par.T_max)
+        sol.l_h_o = np.empty(par.T_max)
+        sol.l_l_o = np.empty(par.T_max)
 
-        sol.wage_h_y = np.empty(par.T)
-        sol.wage_l_y = np.empty(par.T)
-        sol.wage_h_o = np.empty(par.T)
-        sol.wage_l_o = np.empty(par.T)
+        sol.wage_h_y = np.empty(par.T_max)
+        sol.wage_l_y = np.empty(par.T_max)
+        sol.wage_h_o = np.empty(par.T_max)
+        sol.wage_l_o = np.empty(par.T_max)
 
-        sol.Y = np.empty(par.T)
+        sol.Y = np.empty(par.T_max)
 
-        sol.K = np.empty(par.T)
+        sol.K = np.empty(par.T_max)
 
-        sol.c_bar = np.empty(par.T)
+        sol.c_bar = np.empty(par.T_max)
+
+        sol.l_h_o[0] = par.l_h_o_init
+        sol.l_l_o[0] = par.l_l_o_init
+        sol.wage_h_o[0] = par.wage_h_o_init
+        sol.wage_l_o[0] = par.wage_l_o_init
+
+    def allocate_sim(self):
+        """ allocate simulation """
+
+        # unpack
+        par = self.par
+        sol = self.sol
+        sim = self.sim
+
+        sim.l_h_y = np.empty(par.T)
+        sim.l_l_y = np.empty(par.T)
+        sim.l_h_o = np.empty(par.T)
+        sim.l_l_o = np.empty(par.T)
+
+        sim.wage_h_y = np.empty(par.T)
+        sim.wage_l_y = np.empty(par.T)
+        sim.wage_h_o = np.empty(par.T)
+        sim.wage_l_o = np.empty(par.T)
+
+        sim.Y = np.empty(par.T)
+
+        sim.K = np.empty(par.T)
+
+        sim.c_bar = np.empty(par.T)
+
+        sim.l_h_o[0] = par.l_h_o_ss
+        sim.l_l_o[0] = par.l_l_o_ss
+        sim.wage_h_o[0] = par.wage_h_o_ss
+        sim.wage_l_o[0] = par.wage_l_o_ss
 
 
     def solve(self):
@@ -81,15 +125,16 @@ class ModelClass(EconModelClass):
         par = self.par
         sol = self.sol
 
-        sol.l_h_o[0] = par.l_h_o_init
-        sol.l_l_o[0] = par.l_l_o_init
-        sol.wage_h_o[0] = par.wage_h_o_init
-        sol.wage_l_o[0] = par.wage_l_o_init
+        self.allocate()
 
         a = 0.0
         b = par.N_y
 
-        for t in range(par.T):
+        t = 0
+        eps = np.inf
+
+        while t < par.T_max and eps > 1e-6:
+
             sol.l_h_y[t] = optimizer(obj_function, a, b, args=(par, sol, t), tol=1e-6)
 
             sol.l_l_y[t] = par.N_y - sol.l_h_y[t]
@@ -105,13 +150,63 @@ class ModelClass(EconModelClass):
             sol.c_bar[t] = par.A*(par.theta_h_y - par.mu_y*par.theta_l_y)*d2YdLydLo(par, Ly, Lo)*par.theta_h_o
 
 
-            if t < par.T - 1:
+            if t < par.T_max - 1:
                 sol.l_h_o[t+1] = par.rho_h*sol.l_h_y[t]
                 sol.l_l_o[t+1] = par.rho_l*sol.l_l_y[t]
             
                 sol.wage_h_o[t+1] = sol.wage_h_y[t]
                 sol.wage_l_o[t+1] = sol.wage_l_y[t]
 
+                eps = abs(sol.wage_l_o[t+1] - sol.wage_l_o[t])
+
+            par.l_h_o_ss = sol.l_h_o[t]
+            par.l_l_o_ss = sol.l_l_o[t]
+            par.wage_h_o_ss = sol.wage_h_o[t]
+            par.wage_l_o_ss = sol.wage_l_o[t]
+
+            t += 1
+
+
+
+
+    def simulate(self, parameter_names, parameter_values):
+
+        par = self.par
+        sim = self.sim
+
+        self.allocate_sim()
+
+        a = 0.0
+        b = par.N_y
+
+        for t in range(par.T):
+
+            sim.l_h_y[t] = optimizer(obj_function, a, b, args=(par, sim, t), tol=1e-6)
+
+            sim.l_l_y[t] = par.N_y - sim.l_h_y[t]
+
+            sim.K[t] = sim.l_h_o[t] + sim.l_h_y[t]
+
+            Lo = func_Lo(par, sim, t)
+            Ly = func_Ly(par, sim, t)
+
+            sim.wage_h_y[t] = wage_h_y(par, dYdLy(par, Ly, Lo))
+            sim.wage_l_y[t] = wage_l_y(par, dYdLy(par, Ly, Lo))
+
+            sim.c_bar[t] = par.A*(par.theta_h_y - par.mu_y*par.theta_l_y)*d2YdLydLo(par, Ly, Lo)*par.theta_h_o
+
+            if t == par.T_shock - 1:
+                for name, value in zip(parameter_names, parameter_values):
+                    setattr(par, name, value)
+
+            if t < par.T - 1:
+                sim.l_h_o[t+1] = par.rho_h*sim.l_h_y[t]
+                sim.l_l_o[t+1] = par.rho_l*sim.l_l_y[t]
+            
+                sim.wage_h_o[t+1] = sim.wage_h_y[t]
+                sim.wage_l_o[t+1] = sim.wage_l_y[t]
+
+        
 
 
 def obj_function(l_h_y, par, sol, t):
