@@ -41,11 +41,11 @@ class ModelClass(EconModelClass):
         par.theta_l_o = 1.1
         par.theta_h_o = 1.6
 
-        par.mu_y = 1.2
+        par.mu_y = 1.5
         par.mu_o = 1.2
 
-        par.rho_h = 0.6
-        par.rho_l = 0.5
+        par.rho_h = 0.2
+        par.rho_l = 0.2
 
         par.c = 0.7
 
@@ -118,6 +118,8 @@ class ModelClass(EconModelClass):
         sim.wage_h_o[0] = par.wage_h_o_ss
         sim.wage_l_o[0] = par.wage_l_o_ss
 
+        sim.avg_wage = np.empty(par.T)
+
 
     def solve(self):
 
@@ -133,7 +135,7 @@ class ModelClass(EconModelClass):
         t = 0
         eps = np.inf
 
-        while t < par.T_max and eps > 1e-6:
+        while t < par.T_max and eps > par.tol:
 
             sol.l_h_y[t] = optimizer(obj_function, a, b, args=(par, sol, t), tol=1e-6)
 
@@ -144,10 +146,10 @@ class ModelClass(EconModelClass):
             Lo = func_Lo(par, sol, t)
             Ly = func_Ly(par, sol, t)
 
-            sol.wage_h_y[t] = wage_h_y(par, dYdLy(par, Ly, Lo))
-            sol.wage_l_y[t] = wage_l_y(par, dYdLy(par, Ly, Lo))
+            sol.wage_h_y[t] = wage_h_y(par, dY_dLy(par, Ly, Lo))
+            sol.wage_l_y[t] = wage_l_y(par, dY_dLy(par, Ly, Lo))
 
-            sol.c_bar[t] = par.A*(par.theta_h_y - par.mu_y*par.theta_l_y)*d2YdLydLo(par, Ly, Lo)*par.theta_h_o
+            sol.c_bar[t] = par.A*(par.theta_h_y - par.mu_y*par.theta_l_y)*d2Y_dLy_dLo(par, Ly, Lo)*par.theta_h_o
 
 
             if t < par.T_max - 1:
@@ -159,13 +161,12 @@ class ModelClass(EconModelClass):
 
                 eps = abs(sol.wage_l_o[t+1] - sol.wage_l_o[t])
 
-            par.l_h_o_ss = sol.l_h_o[t]
-            par.l_l_o_ss = sol.l_l_o[t]
-            par.wage_h_o_ss = sol.wage_h_o[t]
-            par.wage_l_o_ss = sol.wage_l_o[t]
+            par.l_h_o_ss = sol.l_h_o[t].copy()
+            par.l_l_o_ss = sol.l_l_o[t].copy()
+            par.wage_h_o_ss = sol.wage_h_o[t].copy()
+            par.wage_l_o_ss = sol.wage_l_o[t].copy()
 
             t += 1
-
 
 
 
@@ -190,14 +191,20 @@ class ModelClass(EconModelClass):
             Lo = func_Lo(par, sim, t)
             Ly = func_Ly(par, sim, t)
 
-            sim.wage_h_y[t] = wage_h_y(par, dYdLy(par, Ly, Lo))
-            sim.wage_l_y[t] = wage_l_y(par, dYdLy(par, Ly, Lo))
+            sim.wage_h_y[t] = wage_h_y(par, dY_dLy(par, Ly, Lo))
+            sim.wage_l_y[t] = wage_l_y(par, dY_dLy(par, Ly, Lo))
 
-            sim.c_bar[t] = par.A*(par.theta_h_y - par.mu_y*par.theta_l_y)*d2YdLydLo(par, Ly, Lo)*par.theta_h_o
+            sim.c_bar[t] = par.A*(par.theta_h_y - par.mu_y*par.theta_l_y)*d2Y_dLy_dLo(par, Ly, Lo)*par.theta_h_o
 
-            if t == par.T_shock - 1:
-                for name, value in zip(parameter_names, parameter_values):
-                    setattr(par, name, value)
+            sim.avg_wage[t] = sim.wage_l_y[t]*sim.l_l_y[t]/(sim.l_l_y[t] + sim.l_h_y[t]) + sim.wage_h_y[t]*sim.l_h_y[t]/(sim.l_l_y[t] + sim.l_h_y[t])
+
+            if parameter_names == None:
+                pass
+
+            else:
+                if t == par.T_shock - 1:
+                    for name, value in zip(parameter_names, parameter_values):
+                        setattr(par, name, value)
 
             if t < par.T - 1:
                 sim.l_h_o[t+1] = par.rho_h*sim.l_h_y[t]
@@ -206,7 +213,31 @@ class ModelClass(EconModelClass):
                 sim.wage_h_o[t+1] = sim.wage_h_y[t]
                 sim.wage_l_o[t+1] = sim.wage_l_y[t]
 
-        
+    def average_wage_change(self):
+        par = self.par
+        sim = self.sim
+
+        self.allocate_sim()
+
+        a = 0.0
+        b = par.N_y
+
+        t = 0
+
+        sim.l_h_y[t] = optimizer(obj_function, a, b, args=(par, sim, t), tol=1e-6)
+
+        sim.l_l_y[t] = par.N_y - sim.l_h_y[t]
+
+        sim.K[t] = sim.l_h_o[t] + sim.l_h_y[t]
+                
+        Lo = func_Lo(par, sim, t)
+        Ly = func_Ly(par, sim, t)
+
+        # print(d2Y_dLy2(par, Ly, Lo)*(par.theta_h_y - par.theta_l_y)) # All correct sign here
+        # print(dK_dlhy_prev(par, Ly, Lo) - par.rho_h) # All correct sign here
+        # print(d2Y_dLy_dLo(par, Ly, Lo)*par.theta_h_o*par.rho_h) # All correct sign here
+
+        return d_avg_wy_dhy(par, sim, t, Ly, Lo)
 
 
 def obj_function(l_h_y, par, sol, t):
@@ -216,26 +247,26 @@ def obj_function(l_h_y, par, sol, t):
     
     return diff**2
 
-def dYdLy(par, Ly, Lo):
+def dY_dLy(par, Ly, Lo):
     return par.alpha*(Ly)**(par.alpha-1)*(Lo)**(1-par.alpha)
 
-def d2YdLydLy(par, Ly, Lo):
+def d2Y_dLy2(par, Ly, Lo):
     return par.alpha*(par.alpha - 1)*(Ly)**(par.alpha - 2)*(Lo)**(1 - par.alpha)
 
-def dYdLo(par, Ly, Lo):
+def dY_dLo(par, Ly, Lo):
     return (1 - par.alpha)*(Ly)**(par.alpha)*(Lo)**(- par.alpha)
 
-def d2YdLodLo(par, Ly, Lo):
+def d2Y_dLo2(par, Ly, Lo):
     return (-par.alpha)*(1 - par.alpha)*(Ly)**(par.alpha - 1)*(Lo)**(-par.alpha)
 
-def d2YdLydLo(par, Ly, Lo):
+def d2Y_dLy_dLo(par, Ly, Lo):
     return par.alpha*(1 - par.alpha)*(Ly)**(par.alpha - 1)*(Lo)**(-par.alpha)
 
-def wage_l_y(par, dYdLy):
-    return par.A*par.theta_l_y*dYdLy
+def wage_l_y(par, dY_dLy):
+    return par.A*par.theta_l_y*dY_dLy
 
-def wage_h_y(par, dYdLy):
-    return par.mu_y*par.A*par.theta_l_y*dYdLy
+def wage_h_y(par, dY_dLy):
+    return par.mu_y*par.A*par.theta_l_y*dY_dLy
 
 def func_Lo(par, sol, t):
     return par.theta_h_o*sol.l_h_o[t] + par.theta_l_o*sol.l_l_o[t]
@@ -243,4 +274,28 @@ def func_Lo(par, sol, t):
 def func_Ly(par, sol, t):
     return par.theta_h_y*sol.l_h_y[t] + par.theta_l_y*sol.l_l_y[t]
 
+def dK_dlhy_prev(par, Ly, Lo,):
+    return par.A*(par.theta_h_y - par.mu_y*par.theta_l_y) \
+                    / (par.c - par.A*(par.theta_h_y - par.mu_y*par.theta_l_y)*d2Y_dLy2(par, Ly, Lo)*(par.theta_h_y - par.theta_l_y)) \
+                    * (d2Y_dLy_dLo(par, Ly, Lo)*par.theta_h_o - d2Y_dLy2(par, Ly, Lo)*(par.theta_h_y - par.theta_l_y))*par.rho_h
 
+def dLy_dlhy_prev(par, Ly, Lo):
+    return (par.theta_h_y - par.theta_l_y)*(dK_dlhy_prev(par, Ly, Lo) - par.rho_h)
+
+def dLo_dlhy_prev(par):
+    return par.theta_h_o*par.rho_h
+
+def dlhy_dlhy_prev(par, Ly, Lo):
+    return dK_dlhy_prev(par, Ly, Lo) - par.rho_h
+
+
+def dwly_dlhy_prev(par, Ly, Lo):
+    return par.A*par.theta_l_y*(d2Y_dLy2(par, Ly, Lo)*(par.theta_h_y - par.theta_l_y)*(dK_dlhy_prev(par, Ly, Lo) - par.rho_h) + d2Y_dLy_dLo(par, Ly, Lo)*par.theta_h_o*par.rho_h)
+
+def d_avg_wy_dhy(par, sol, t, Ly, Lo):
+    ly = sol.l_l_y[t] + sol.l_h_y[t]
+    
+    print("First half", 1/ly*(par.mu_y - 1)*sol.wage_l_y[t]*dlhy_dlhy_prev(par, Ly, Lo))
+    print("Second half", (1/ly*(par.mu_y - 1)*sol.l_h_y[t] + 1)*dwly_dlhy_prev(par, Ly, Lo))
+
+    return 1/ly*(par.mu_y - 1)*sol.wage_l_y[t]*dlhy_dlhy_prev(par, Ly, Lo) + (1/ly*(par.mu_y - 1)*sol.l_h_y[t] + 1)*dwly_dlhy_prev(par, Ly, Lo)
