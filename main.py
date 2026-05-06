@@ -30,24 +30,18 @@ class ModelClass(EconModelClass):
 
         par.tol = 1e-6
 
-        par.A = 1.0
-
-        par.N_y = 1
-
-        par.alpha = 0.6
-
-        par.theta_l_y = 1.0
-        par.theta_h_y = 1.4
-        par.theta_l_o = 1.1
-        par.theta_h_o = 1.6
-
-        par.mu_y = 1.5
-        par.mu_o = 1.2
-
-        par.rho_h = 0.2
-        par.rho_l = 0.2
-
-        par.c = 0.7
+        par.A =  5.0
+        par.N_y =  1.9
+        par.alpha =  0.90
+        par.theta_l_y =  0.66
+        par.theta_h_y =  5.0
+        par.theta_l_o =  0.9
+        par.theta_h_o =  4.7
+        par.mu_y =  7.3
+        par.mu_o =  None
+        par.rho_h = 0.5
+        par.rho_l =  0.8
+        par.c =  0.5
 
         par.l_h_o_init = 0.2
         par.l_l_o_init = 0.45
@@ -89,6 +83,9 @@ class ModelClass(EconModelClass):
         sol.wage_h_o[0] = par.wage_h_o_init
         sol.wage_l_o[0] = par.wage_l_o_init
 
+        sol.avg_wage_young = np.empty(par.T)
+        sol.avg_wage_old = np.empty(par.T)
+
     def allocate_sim(self):
         """ allocate simulation """
 
@@ -118,7 +115,8 @@ class ModelClass(EconModelClass):
         sim.wage_h_o[0] = par.wage_h_o_ss
         sim.wage_l_o[0] = par.wage_l_o_ss
 
-        sim.avg_wage = np.empty(par.T)
+        sim.avg_wage_young = np.empty(par.T)
+        sim.avg_wage_old = np.empty(par.T)
 
 
     def solve(self):
@@ -137,29 +135,9 @@ class ModelClass(EconModelClass):
 
         while t < par.T_max and eps > par.tol:
 
-            sol.l_h_y[t] = optimizer(obj_function, a, b, args=(par, sol, t), tol=1e-6)
+            calc_equilibrium(par, sol, t, a, b, par.T_max)
 
-            sol.l_l_y[t] = par.N_y - sol.l_h_y[t]
-
-            sol.K[t] = sol.l_h_o[t] + sol.l_h_y[t]
-
-            Lo = func_Lo(par, sol, t)
-            Ly = func_Ly(par, sol, t)
-
-            sol.wage_h_y[t] = wage_h_y(par, dY_dLy(par, Ly, Lo))
-            sol.wage_l_y[t] = wage_l_y(par, dY_dLy(par, Ly, Lo))
-
-            sol.c_bar[t] = par.A*(par.theta_h_y - par.mu_y*par.theta_l_y)*d2Y_dLy_dLo(par, Ly, Lo)*par.theta_h_o
-
-
-            if t < par.T_max - 1:
-                sol.l_h_o[t+1] = par.rho_h*sol.l_h_y[t]
-                sol.l_l_o[t+1] = par.rho_l*sol.l_l_y[t]
-            
-                sol.wage_h_o[t+1] = sol.wage_h_y[t]
-                sol.wage_l_o[t+1] = sol.wage_l_y[t]
-
-                eps = abs(sol.wage_l_o[t+1] - sol.wage_l_o[t])
+            eps = abs(sol.wage_l_o[t+1] - sol.wage_l_o[t])
 
             par.l_h_o_ss = sol.l_h_o[t].copy()
             par.l_l_o_ss = sol.l_l_o[t].copy()
@@ -170,7 +148,49 @@ class ModelClass(EconModelClass):
 
 
 
-    def simulate(self, parameter_names, parameter_values):
+    def simulate_par_shock(self, parameter_names, parameter_values, single_period_shock=False):
+
+        par = self.par
+        sim = self.sim
+
+        self.allocate_sim()
+
+        self._saved_par_values = {
+                    name: getattr(par, name)
+                    for name in parameter_names
+                }
+
+        a = 0.0
+        b = par.N_y
+
+        for t in range(par.T):
+
+            
+            if parameter_names == None:
+                pass
+
+            elif single_period_shock:
+                if t == par.T_shock - 1:
+                    for name, value in zip(parameter_names, parameter_values):
+                        setattr(par, name, value)
+
+                if t == par.T_shock:
+                    for name, old_value in self._saved_par_values.items():
+                        setattr(par, name, old_value)
+
+            else:
+                if t == par.T_shock - 1:
+                    for name, value in zip(parameter_names, parameter_values):
+                        setattr(par, name, value)
+
+            
+            calc_equilibrium(par, sim, t, a, b, par.T)
+
+        for name, old_value in self._saved_par_values.items():
+            setattr(par, name, old_value)
+
+
+    def simulate_series_shock(self, series_names, series_values):
 
         par = self.par
         sim = self.sim
@@ -179,41 +199,26 @@ class ModelClass(EconModelClass):
 
         a = 0.0
         b = par.N_y
+        
 
         for t in range(par.T):
 
-            sim.l_h_y[t] = optimizer(obj_function, a, b, args=(par, sim, t), tol=1e-6)
-
-            sim.l_l_y[t] = par.N_y - sim.l_h_y[t]
-
-            sim.K[t] = sim.l_h_o[t] + sim.l_h_y[t]
-
-            Lo = func_Lo(par, sim, t)
-            Ly = func_Ly(par, sim, t)
-
-            sim.wage_h_y[t] = wage_h_y(par, dY_dLy(par, Ly, Lo))
-            sim.wage_l_y[t] = wage_l_y(par, dY_dLy(par, Ly, Lo))
-
-            sim.c_bar[t] = par.A*(par.theta_h_y - par.mu_y*par.theta_l_y)*d2Y_dLy_dLo(par, Ly, Lo)*par.theta_h_o
-
-            sim.avg_wage[t] = sim.wage_l_y[t]*sim.l_l_y[t]/(sim.l_l_y[t] + sim.l_h_y[t]) + sim.wage_h_y[t]*sim.l_h_y[t]/(sim.l_l_y[t] + sim.l_h_y[t])
-
-            if parameter_names == None:
+            if series_names == None:
                 pass
 
             else:
-                if t == par.T_shock - 1:
-                    for name, value in zip(parameter_names, parameter_values):
-                        setattr(par, name, value)
-
-            if t < par.T - 1:
-                sim.l_h_o[t+1] = par.rho_h*sim.l_h_y[t]
-                sim.l_l_o[t+1] = par.rho_l*sim.l_l_y[t]
+                if t == par.T_shock:
+                    for name, value in zip(series_names, series_values):
+                        getattr(sim, name)[t] = value
             
-                sim.wage_h_o[t+1] = sim.wage_h_y[t]
-                sim.wage_l_o[t+1] = sim.wage_l_y[t]
+            # print(sim.l_h_y[t])
 
-    def average_wage_change(self):
+            calc_equilibrium(par, sim, t, a, b, par.T)
+
+
+
+
+    def average_wage_change(self, print_components=False):
         par = self.par
         sim = self.sim
 
@@ -229,15 +234,54 @@ class ModelClass(EconModelClass):
         sim.l_l_y[t] = par.N_y - sim.l_h_y[t]
 
         sim.K[t] = sim.l_h_o[t] + sim.l_h_y[t]
-                
+
         Lo = func_Lo(par, sim, t)
         Ly = func_Ly(par, sim, t)
+
+        sim.wage_h_y[t] = wage_h_y(par, dY_dLy(par, Ly, Lo))
+        sim.wage_l_y[t] = wage_l_y(par, dY_dLy(par, Ly, Lo))
+
+        sim.c_bar[t] = par.A*(par.theta_h_y - par.mu_y*par.theta_l_y)*d2Y_dLy_dLo(par, Ly, Lo)*par.theta_h_o
+
+        sim.avg_wage_young[t] = sim.wage_l_y[t]*sim.l_l_y[t]/(sim.l_l_y[t] + sim.l_h_y[t]) + sim.wage_h_y[t]*sim.l_h_y[t]/(sim.l_l_y[t] + sim.l_h_y[t])
+        sim.avg_wage_old[t] = sim.wage_l_o[t]*sim.l_l_o[t]/(sim.l_l_o[t] + sim.l_h_o[t]) + sim.wage_h_o[t]*sim.l_h_o[t]/(sim.l_l_o[t] + sim.l_h_o[t])
+
 
         # print(d2Y_dLy2(par, Ly, Lo)*(par.theta_h_y - par.theta_l_y)) # All correct sign here
         # print(dK_dlhy_prev(par, Ly, Lo) - par.rho_h) # All correct sign here
         # print(d2Y_dLy_dLo(par, Ly, Lo)*par.theta_h_o*par.rho_h) # All correct sign here
 
-        return d_avg_wy_dhy(par, sim, t, Ly, Lo)
+        return d_avg_wy_dhy(par, sim, t, Ly, Lo, print_components=print_components)
+
+
+def calc_equilibrium(par, sol, t, a, b, T):
+
+    sol.l_h_y[t] = optimizer(obj_function, a, b, args=(par, sol, t), tol=1e-6)
+
+    sol.l_l_y[t] = par.N_y - sol.l_h_y[t]
+
+    sol.K[t] = sol.l_h_o[t] + sol.l_h_y[t]
+
+    Lo = func_Lo(par, sol, t)
+    Ly = func_Ly(par, sol, t)
+
+    sol.wage_h_y[t] = wage_h_y(par, dY_dLy(par, Ly, Lo))
+    sol.wage_l_y[t] = wage_l_y(par, dY_dLy(par, Ly, Lo))
+
+    sol.c_bar[t] = par.A*(par.theta_h_y - par.mu_y*par.theta_l_y)*d2Y_dLy_dLo(par, Ly, Lo)*par.theta_h_o
+
+    sol.avg_wage_young[t] = sol.wage_l_y[t]*sol.l_l_y[t]/(sol.l_l_y[t] + sol.l_h_y[t]) + sol.wage_h_y[t]*sol.l_h_y[t]/(sol.l_l_y[t] + sol.l_h_y[t])
+    sol.avg_wage_old[t] = sol.wage_l_o[t]*sol.l_l_o[t]/(sol.l_l_o[t] + sol.l_h_o[t]) + sol.wage_h_o[t]*sol.l_h_o[t]/(sol.l_l_o[t] + sol.l_h_o[t])
+
+    
+    if t < T - 1:
+        sol.l_h_o[t+1] = par.rho_h*sol.l_h_y[t]
+        sol.l_l_o[t+1] = par.rho_l*sol.l_l_y[t]
+    
+        sol.wage_h_o[t+1] = sol.wage_h_y[t]
+        sol.wage_l_o[t+1] = sol.wage_l_y[t]
+
+        
 
 
 def obj_function(l_h_y, par, sol, t):
@@ -292,10 +336,11 @@ def dlhy_dlhy_prev(par, Ly, Lo):
 def dwly_dlhy_prev(par, Ly, Lo):
     return par.A*par.theta_l_y*(d2Y_dLy2(par, Ly, Lo)*(par.theta_h_y - par.theta_l_y)*(dK_dlhy_prev(par, Ly, Lo) - par.rho_h) + d2Y_dLy_dLo(par, Ly, Lo)*par.theta_h_o*par.rho_h)
 
-def d_avg_wy_dhy(par, sol, t, Ly, Lo):
+def d_avg_wy_dhy(par, sol, t, Ly, Lo, print_components=False):
     ly = sol.l_l_y[t] + sol.l_h_y[t]
     
-    print("First half", 1/ly*(par.mu_y - 1)*sol.wage_l_y[t]*dlhy_dlhy_prev(par, Ly, Lo))
-    print("Second half", (1/ly*(par.mu_y - 1)*sol.l_h_y[t] + 1)*dwly_dlhy_prev(par, Ly, Lo))
+    if print_components:
+        print("Career spillovers", 1/ly*(par.mu_y - 1)*sol.wage_l_y[t]*dlhy_dlhy_prev(par, Ly, Lo))
+        print("Wage level", (1/ly*(par.mu_y - 1)*sol.l_h_y[t] + 1)*dwly_dlhy_prev(par, Ly, Lo))
 
     return 1/ly*(par.mu_y - 1)*sol.wage_l_y[t]*dlhy_dlhy_prev(par, Ly, Lo) + (1/ly*(par.mu_y - 1)*sol.l_h_y[t] + 1)*dwly_dlhy_prev(par, Ly, Lo)
