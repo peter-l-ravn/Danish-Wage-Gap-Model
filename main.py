@@ -9,6 +9,8 @@ from consav.quadrature import log_normal_gauss_hermite
 
 from optimizer import optimizer
 
+from IPython.display import display, Math
+
 class ModelClass(EconModelClass):
 
     def settings(self):
@@ -83,8 +85,8 @@ class ModelClass(EconModelClass):
         sol.wage_h_o[0] = par.wage_h_o_init
         sol.wage_l_o[0] = par.wage_l_o_init
 
-        sol.avg_wage_young = np.empty(par.T)
-        sol.avg_wage_old = np.empty(par.T)
+        sol.avg_wage_young = np.empty(par.T_max)
+        sol.avg_wage_old = np.empty(par.T_max)
 
     def allocate_sim(self):
         """ allocate simulation """
@@ -119,7 +121,7 @@ class ModelClass(EconModelClass):
         sim.avg_wage_old = np.empty(par.T)
 
 
-    def solve(self):
+    def solve(self, do_print=False):
 
         # a. unpack
         par = self.par
@@ -133,9 +135,9 @@ class ModelClass(EconModelClass):
         t = 0
         eps = np.inf
 
-        while t < par.T_max and eps > par.tol:
+        while t < (par.T_max - 1) and eps > par.tol:
 
-            calc_equilibrium(par, sol, t, a, b, par.T_max)
+            calc_equilibrium(par, sol, t, a, b, par.T_max, do_print=do_print)
 
             eps = abs(sol.wage_l_o[t+1] - sol.wage_l_o[t])
 
@@ -184,7 +186,7 @@ class ModelClass(EconModelClass):
                         setattr(par, name, value)
 
             
-            calc_equilibrium(par, sim, t, a, b, par.T)
+            calc_equilibrium(par, sim, t, a, b, par.T, do_print=False)
 
         for name, old_value in self._saved_par_values.items():
             setattr(par, name, old_value)
@@ -213,7 +215,7 @@ class ModelClass(EconModelClass):
             
             # print(sim.l_h_y[t])
 
-            calc_equilibrium(par, sim, t, a, b, par.T)
+            calc_equilibrium(par, sim, t, a, b, par.T, do_print=False)
 
 
 
@@ -254,7 +256,7 @@ class ModelClass(EconModelClass):
         return d_avg_wy_dhy(par, sim, t, Ly, Lo, print_components=print_components)
 
 
-def calc_equilibrium(par, sol, t, a, b, T):
+def calc_equilibrium(par, sol, t, a, b, T, do_print=False):
 
     sol.l_h_y[t] = optimizer(obj_function, a, b, args=(par, sol, t), tol=1e-6)
 
@@ -273,6 +275,7 @@ def calc_equilibrium(par, sol, t, a, b, T):
     sol.avg_wage_young[t] = sol.wage_l_y[t]*sol.l_l_y[t]/(sol.l_l_y[t] + sol.l_h_y[t]) + sol.wage_h_y[t]*sol.l_h_y[t]/(sol.l_l_y[t] + sol.l_h_y[t])
     sol.avg_wage_old[t] = sol.wage_l_o[t]*sol.l_l_o[t]/(sol.l_l_o[t] + sol.l_h_o[t]) + sol.wage_h_o[t]*sol.l_h_o[t]/(sol.l_l_o[t] + sol.l_h_o[t])
 
+    constraints(par, sol, t, do_print=do_print)
     
     if t < T - 1:
         sol.l_h_o[t+1] = par.rho_h*sol.l_h_y[t]
@@ -344,3 +347,66 @@ def d_avg_wy_dhy(par, sol, t, Ly, Lo, print_components=False):
         print("Wage level", (1/ly*(par.mu_y - 1)*sol.l_h_y[t] + 1)*dwly_dlhy_prev(par, Ly, Lo))
 
     return 1/ly*(par.mu_y - 1)*sol.wage_l_y[t]*dlhy_dlhy_prev(par, Ly, Lo) + (1/ly*(par.mu_y - 1)*sol.l_h_y[t] + 1)*dwly_dlhy_prev(par, Ly, Lo)
+
+
+def constraints(par, sol, t, do_print=False):
+
+    if par.theta_h_o < par.theta_l_o:
+        if do_print:
+            display(Math(r'\theta_h^o > \theta_{\ell}^o \text{ does not apply}'))
+        return False
+
+    if par.theta_h_y < par.theta_l_y:
+        if do_print:
+            display(Math(r'\theta_h^y > \theta_{\ell}^y \text{ does not apply}'))
+        return False
+
+    if par.mu_y < 1.0:
+        if do_print:
+            display(Math(r'\mu_y > 1 \text{ does not apply}'))
+        return False
+
+    if sol.wage_h_o[t] / sol.wage_l_o[t] < 1.0:
+        if do_print:
+            display(Math(r'\mu_y > 1\text{ does not apply}'))
+        return False
+
+    return True
+
+
+
+def params_to_latex(par, filename="params.tex", prefix="par"):
+    """
+    Save all parameters in a namespace/object as LaTeX commands.
+    """
+
+    lines = []
+
+    for key, value in vars(par).items():
+
+        # handle None
+        if value is None:
+            value_str = "None"
+
+        # handle numpy scalars
+        elif isinstance(value, np.generic):
+            value_str = f"{value.item()}"
+
+        # handle floats
+        elif isinstance(value, float):
+            value_str = f"{value:.10g}"
+
+        else:
+            value_str = str(value)
+
+        line = rf"\newcommand{{\{prefix}_{key}}}{{{value_str}}}"
+        lines.append(line)
+
+    latex_code = "\n".join(lines)
+
+    with open(filename, "w") as f:
+        f.write(latex_code)
+
+    print(f"Saved LaTeX commands to: {filename}")
+
+    return latex_code
