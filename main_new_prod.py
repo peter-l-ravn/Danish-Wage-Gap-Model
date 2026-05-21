@@ -320,7 +320,7 @@ def dY_dLh(par, Ll, Lh):
     return (1 - par.alpha)*(Ll)**(par.alpha)*(Lh)**(- par.alpha)
 
 def d2Y_dLh2(par, Ll, Lh):
-    return (-par.alpha)*(1 - par.alpha)*(Ll)**(par.alpha - 1)*(Lh)**(-par.alpha - 1)
+    return (-par.alpha)*(1 - par.alpha)*(Ll)**(par.alpha)*(Lh)**(-par.alpha - 1)
 
 def d2Y_dLl_dLh(par, Ll, Lh):
     return par.alpha*(1 - par.alpha)*(Ll)**(par.alpha - 1)*(Lh)**(-par.alpha)

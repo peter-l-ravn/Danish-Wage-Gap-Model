@@ -304,7 +304,7 @@ def dY_dLo(par, Ly, Lo):
     return (1 - par.alpha)*(Ly)**(par.alpha)*(Lo)**(- par.alpha)
 
 def d2Y_dLo2(par, Ly, Lo):
-    return (-par.alpha)*(1 - par.alpha)*(Ly)**(par.alpha - 1)*(Lo)**(-par.alpha)
+    return (-par.alpha)*(1 - par.alpha)*(Ly)**(par.alpha)*(Lo)**(-par.alpha - 1)
 
 def d2Y_dLy_dLo(par, Ly, Lo):
     return par.alpha*(1 - par.alpha)*(Ly)**(par.alpha - 1)*(Lo)**(-par.alpha)
@@ -342,11 +342,14 @@ def dwly_dlhy_prev(par, Ly, Lo):
 def d_avg_wy_dhy(par, sol, t, Ly, Lo, print_components=False):
     ly = sol.l_l_y[t] + sol.l_h_y[t]
     
+    career = 1/ly*(par.mu_y - 1)*sol.wage_l_y[t]*dlhy_dlhy_prev(par, Ly, Lo)
+    level = (1/ly*(par.mu_y - 1)*sol.l_h_y[t] + 1)*dwly_dlhy_prev(par, Ly, Lo)
+
     if print_components:
         print("Career spillovers", 1/ly*(par.mu_y - 1)*sol.wage_l_y[t]*dlhy_dlhy_prev(par, Ly, Lo))
         print("Wage level", (1/ly*(par.mu_y - 1)*sol.l_h_y[t] + 1)*dwly_dlhy_prev(par, Ly, Lo))
 
-    return 1/ly*(par.mu_y - 1)*sol.wage_l_y[t]*dlhy_dlhy_prev(par, Ly, Lo) + (1/ly*(par.mu_y - 1)*sol.l_h_y[t] + 1)*dwly_dlhy_prev(par, Ly, Lo)
+    return career + level, career, level
 
 
 def constraints(par, sol, t, do_print=False):
