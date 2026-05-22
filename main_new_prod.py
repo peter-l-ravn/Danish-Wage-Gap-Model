@@ -251,9 +251,7 @@ class ModelClass(EconModelClass):
 
         sim.c_bar[t] = par.A*(par.theta_h_y - par.mu_y*par.theta_l_y)*d2Y_dLl_dLh(par, Ll, Lh)*par.theta_h_o
 
-        sim.avg_wage_young[t] = sim.wage_l_y[t]*sim.l_l_y[t]/(sim.l_l_y[t] + sim.l_h_y[t]) + sim.wage_h_y[t]*sim.l_h_y[t]/(sim.l_l_y[t] + sim.l_h_y[t])
-        sim.avg_wage_old[t] = sim.wage_l_o[t]*sim.l_l_o[t]/(sim.l_l_o[t] + sim.l_h_o[t]) + sim.wage_h_o[t]*sim.l_h_o[t]/(sim.l_l_o[t] + sim.l_h_o[t])
-
+        sim.avg_wage[t, :] = sim.wage_l[t, :]*sim.l_l[t, :]/(sim.l_l[t, :] + sim.l_h[t, :]) + sim.wage_h[t, :]*sim.l_h[t, :]/(sim.l_l[t, :] + sim.l_h[t, :])
 
         # print(d2Y_dLl2(par, Ll, Lh)*(par.theta_h_y - par.theta_l_y)) # All correct sign here
         # print(dK_dlhy_prev(par, Ll, Lh) - par.rho_h) # All correct sign here
