@@ -33,8 +33,8 @@ class ModelClass(EconModelClass):
 
         par.tol = 1e-8
 
-        par.A =  5.0
-        par.N_1 =  1.9
+        par.A =  1.0
+        par.N_1 =  1.0
         par.alpha =  0.5
 
         par.theta_l = np.loadtxt('Exogenous_estimation/theta_l.csv', delimiter=',')
@@ -45,7 +45,7 @@ class ModelClass(EconModelClass):
         par.rho_h = np.loadtxt('Exogenous_estimation/rho_h.csv', delimiter=',')
         par.rho_l = np.loadtxt('Exogenous_estimation/rho_l.csv', delimiter=',')
 
-        par.phi = 0.99
+        par.phi = 0.9
 
         par.c =  0.5
 
