@@ -24,6 +24,9 @@ class ModelClass(EconModelClass):
         # unpack
         par = self.par
 
+        par.solver = 'golden'  # 'brentq' or 'golden'
+        par.function_calls = 0
+
         par.T = 20
         par.T_shock = 10
 
@@ -233,7 +236,11 @@ class ModelClass(EconModelClass):
 
         t = 0
 
-        sim.l_h[t, 0] = golden(obj_function, a, b, args=(par, sim, t), tol=1e-6)
+        if par.solver == 'brentq':
+            sim.l_h[t, 0] = brentq_solution(par, sim, t, a, b)
+
+        else: 
+            sim.l_h[t, 0] = golden(obj_function, a, b, args=(par, sim, t), tol=1e-6)
 
         sim.l_l[t, 0] = par.N_1 - sim.l_h[t, 0]
 
@@ -254,10 +261,29 @@ class ModelClass(EconModelClass):
         sim.avg_wage[t, :] = sim.wage_l[t, :]*sim.l_l[t, :]/(sim.l_l[t, :] + sim.l_h[t, :]) + sim.wage_h[t, :]*sim.l_h[t, :]/(sim.l_l[t, :] + sim.l_h[t, :])
 
 
+def brentq_solution(par, sol, t, a, b):
+
+    fa = obj_function(a, par, sol, t)
+    fb = obj_function(b, par, sol, t)
+
+    if fa == 0:
+        return a
+    if fb == 0:
+        return b
+
+    if fa * fb < 0:
+        return brentq(obj_function, a, b, args=(par, sol, t), xtol=1e-6)
+
+    return a if abs(fa) <= abs(fb) else b
+        
+
 def calc_equilibrium(par, sol, t, a, b, T, do_print=False):
 
+    if par.solver == 'brentq':
+        sol.l_h[t, 0] = brentq_solution(par, sol, t, a, b)
 
-    sol.l_h[t, 0] = golden(obj_function, a, b, args=(par, sol, t), tol=1e-6)
+    else: 
+        sol.l_h[t, 0] = golden(obj_function, a, b, args=(par, sol, t), tol=1e-6)
 
     sol.l_l[t, 0] = par.N_1 - sol.l_h[t, 0]
 
@@ -293,6 +319,8 @@ def calc_equilibrium(par, sol, t, a, b, T, do_print=False):
 
 def obj_function(l_h_1, par, sol, t):
 
+    par.function_calls += 1
+
     sol.l_h[t, 0] = l_h_1
     sol.l_l[t, 0] = par.N_1 - sol.l_h[t, 0]
 
@@ -303,7 +331,11 @@ def obj_function(l_h_1, par, sol, t):
 
     diff = (par.A/par.c) * (par.theta_h[0]*dY_dLh(par, Ll, Lh) - par.mu*par.theta_l[0]*dY_dLl(par, Ll, Lh)) - K    
 
-    return diff**2
+    if par.solver == 'brentq':
+        return diff
+    
+    else:
+        return diff**2
 
 def dY_dLl(par, Ll, Lh):
     return par.alpha*(Ll)**(par.alpha-1)*(Lh)**(1-par.alpha)
