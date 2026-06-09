@@ -24,7 +24,7 @@ class ModelClass(EconModelClass):
         # unpack
         par = self.par
 
-        par.solver = 'golden'  # 'brentq' or 'golden'
+        par.solver = 'brentq'  # 'brentq' or 'golden'
         par.function_calls = 0
 
         par.T = 20
