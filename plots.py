@@ -50,7 +50,10 @@ def plot_series(series, title, ylabel="Average wage of young workers"):
 
     fig, ax = plt.subplots(figsize=(8, 5))
 
+    x = np.arange(1991, 2024)
+
     ax.plot(
+        x,
         series,
         color="#008cff",
         linewidth=2.0,
