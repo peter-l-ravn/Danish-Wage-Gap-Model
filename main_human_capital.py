@@ -69,6 +69,13 @@ class ModelClass(EconModelClass):
         par.wage_h_ss = np.nan
         par.wage_l_ss = np.nan
 
+    def update_params(self):
+
+        par = self.par
+
+        par.Q_a = np.clip(par.Q_a_shape * np.arange(par.n), None, 1)
+
+
 
     def allocate(self):
         """ allocate model """
