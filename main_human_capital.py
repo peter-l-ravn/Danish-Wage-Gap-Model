@@ -56,8 +56,11 @@ class ModelClass(EconModelClass):
 
         par.c =  0.5
 
-        par.Q_a_shape = 0.005
-        par.Q_a = np.clip(par.Q_a_shape * np.arange(par.n), None, 1)
+        par.shape_a = 10.3
+        par.shape_b = 2.2
+        par.shape_c = 0.40
+        x = np.arange(0, par.n, 1)
+        par.Q_a = par.shape_c * np.exp(x / par.shape_a - par.shape_b) / (1 + np.exp(x / par.shape_a - par.shape_b))
 
         par.l_h_init = np.ones(par.n)*par.N_1*0.5
         par.l_l_init = np.ones(par.n)*(par.N_1 - par.l_h_init[0])
@@ -73,7 +76,8 @@ class ModelClass(EconModelClass):
 
         par = self.par
 
-        par.Q_a = np.clip(par.Q_a_shape * np.arange(par.n), None, 1)
+        x = np.arange(0, par.n, 1)
+        par.Q_a = par.shape_c * np.exp(x / par.shape_a - par.shape_b) / (1 + np.exp(x / par.shape_a - par.shape_b))
 
 
 
@@ -150,7 +154,7 @@ class ModelClass(EconModelClass):
             if t == 0:
                 eps = 10e+10
             else:
-                eps = abs(sum(sol.wage_l[t - 1, :] - sol.wage_l[t, :]))
+                eps = max(abs(sol.wage_l[t - 1, :] - sol.wage_l[t, :]))
 
             par.l_h_ss = sol.l_h[t, :].copy()
             par.l_l_ss = sol.l_l[t, :].copy()
@@ -317,18 +321,22 @@ def calc_equilibrium(par, sol, t, T, do_print=False):
     sol.l_h[t, 0] = 0.0
     sol.l_l[t, 0] = par.N_1
 
-    for age in reversed(range(1, par.n)):
+    for age in reversed(range(0, par.n)):
 
         N_a = sol.l_h[t, age] + sol.l_l[t, age]
 
         a = sol.l_h[t, age]
         b = par.Q_a[age]*N_a
 
-        if par.solver == 'brentq':
-            sol.l_h[t, age] = brentq_solution(par, sol, t, a, b, age)
+        if b < a:
+            pass
 
-        else: 
-            sol.l_h[t, age] = golden(obj_function, a, b, args=(par, sol, t, age), tol=1e-6)
+        else:
+            if par.solver == 'brentq':
+                sol.l_h[t, age] = brentq_solution(par, sol, t, a, b, age)
+
+            else: 
+                sol.l_h[t, age] = golden(obj_function, a, b, args=(par, sol, t, age), tol=1e-6)
 
         sol.l_l[t, age] = N_a - sol.l_h[t, age]
 
@@ -374,7 +382,7 @@ def obj_function(l_h_a, par, sol, t, age):
 
     K = sum(sol.l_h[t, :])
 
-    diff = (par.A/par.c) * (par.theta_h[0]*dY_dLh(par, Ll, Lh) - par.mu*par.theta_l[0]*dY_dLl(par, Ll, Lh)) - K    
+    diff = (par.A/par.c) * (par.theta_h[age]*dY_dLh(par, Ll, Lh) - par.mu*par.theta_l[age]*dY_dLl(par, Ll, Lh)) - K    
 
     if par.solver == 'brentq':
         return diff
