@@ -171,3 +171,53 @@ def brentq(f, a, b, args=(), xtol=1e-12, rtol=4.440892098500626e-16, maxiter=100
             d = e = b - a
 
     raise RuntimeError("Maximum iterations exceeded")
+
+
+
+def golden_section_minimize_integer(par, sol, t, f=None):
+    """
+    Integer-valued golden-section-like minimization on [0, n-1],
+    where n is the number of non-NaN ages at time t.
+
+    Parameters
+    ----------
+    par, sol, t :
+        Passed through to f.
+    f : callable
+        Function of the form f(qualified_idx, par, sol, t).
+
+    Returns
+    -------
+    x_star : int
+        Minimizer.
+    f_star : float
+        Function value at minimizer.
+    """
+    if f is None:
+        raise ValueError("Provide f(qualified_idx, par, sol, t).")
+
+    a = 0
+    b = np.count_nonzero(~np.isnan(sol.age[:, t])) - 1
+
+    phi = (np.sqrt(5) - 1) / 2
+
+    while b - a > 2:
+        c = a + int(np.floor((1 - phi) * (b - a)))
+        d = a + int(np.floor(phi * (b - a)))
+
+        if c == d:
+            break
+
+        fc = f(c, par, sol, t)
+        fd = f(d, par, sol, t)
+
+        if fc > fd:
+            a = c
+        else:
+            b = d
+
+    xs = np.arange(a, b + 1)
+    vals = np.array([f(x, par, sol, t) for x in xs])
+    i = np.argmin(vals)
+    
+    return int(xs[i]), vals[i]
