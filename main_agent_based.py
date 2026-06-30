@@ -25,11 +25,11 @@ class ModelClass(EconModelClass):
         # unpack
         par = self.par
 
-        par.T = 20 # Periods to simulate
-        par.T_max = 100 # Max solver iterations
+        par.T = 10 # Periods to simulate
+        par.T_max = 50 # Max solver iterations
 
-        par.N_1 = 1000 # New entrants per cohort
-        par.n = 50 # Number of cohorts
+        par.N_1 = 5000 # New entrants per cohort
+        par.n = 31 # Number of cohorts
 
         par.A =  100.0 # Total factor productivity
         par.alpha =  0.5 # Output elasticity of low-skilled labor
@@ -69,24 +69,32 @@ class ModelClass(EconModelClass):
         sol.c_bar = np.full((par.T_max), np.nan)
 
         max_capacity_factor = 1.1
-        max_capacity = int(par.N_1 * par.n * max_capacity_factor)
+        max_capacity = 0
+
+        for age in range(par.n - 1):
+            max_capacity += int(par.N_1 * par.rho[age] * max_capacity_factor)
 
         sol.age = np.full((max_capacity, par.T_max), np.nan)
         sol.wage = np.full((max_capacity, par.T_max), np.nan)
         sol.l_h = np.full((max_capacity, par.T_max), np.nan)
+        sol.ability = np.full((max_capacity, par.T_max), np.nan)
         sol.theta_l = np.full((max_capacity, par.T_max), np.nan)
         sol.theta_h = np.full((max_capacity, par.T_max), np.nan)
-        sol.ability = np.full((max_capacity, par.T_max), np.nan)
 
-        sol.age[:par.N_1*par.n, 0] = np.repeat(np.arange(0, par.n, 1), par.N_1)
-        sol.wage[:par.N_1*par.n, 0] = np.repeat(np.ones((1, par.n)), par.N_1)
-        sol.l_h[:par.N_1*par.n, 0] = sol.age[:par.N_1*par.n, 0] > 50
-        sol.l_h[par.N_1*par.n-2, 0] = True 
+        for age in range(par.n - 1):
+            num_individuals = int(par.N_1 * np.prod(par.rho[:age + 1]))
+            start_idx = int(sum(par.N_1 * np.prod(par.rho[:age]) for age in range(age)))
+            end_idx = start_idx + num_individuals
 
-        sol.ability[:par.N_1*par.n, 0] = np.random.lognormal(par.theta_mean, par.theta_std, par.N_1 * par.n)
+            sol.age[start_idx:end_idx, 0] = age
+            sol.wage[start_idx:end_idx, 0] = 1.0
+            sol.l_h[start_idx:end_idx, 0] = age > 48
+            sol.ability[start_idx:end_idx, 0] = draw_fixed_ability(par, num_individuals)
+            sol.theta_l[start_idx:end_idx, 0] = par.theta_l[age] + sol.ability[start_idx:end_idx, 0]
+            sol.theta_h[start_idx:end_idx, 0] = par.theta_h[age] + sol.ability[start_idx:end_idx, 0]
 
-        sol.theta_l[:par.N_1*par.n, 0] = np.repeat(par.theta_l, par.N_1) + sol.ability[:par.N_1*par.n, 0]
-        sol.theta_h[:par.N_1*par.n, 0] = np.repeat(par.theta_h, par.N_1) + sol.ability[:par.N_1*par.n, 0]
+
+
 
         
     def allocate_sim(self, T):
@@ -113,7 +121,14 @@ class ModelClass(EconModelClass):
             new_cohort_age = np.zeros(par.N_1)
             old_cohort_age = sol.age[:, t] + 1
 
-            alive_mask = old_cohort_age < par.n
+            alive_mask = np.zeros_like(old_cohort_age, dtype=bool)
+
+            for age in range(1, par.n - 1):
+                idx = np.where(old_cohort_age == age)[0]
+                number_in_cohort = int(len(idx) * par.rho[age])
+
+                alive_mask[idx[:number_in_cohort]] = True
+                alive_mask[idx[number_in_cohort:]] = False
 
             generation = np.concatenate((new_cohort_age, old_cohort_age[alive_mask]))
 
@@ -122,7 +137,7 @@ class ModelClass(EconModelClass):
             new_cohort_l_h = np.repeat(False, par.N_1)
             sol.l_h[:len(generation), t + 1] = np.concatenate((new_cohort_l_h, sol.l_h[alive_mask, t]))
 
-            new_cohort_ability = np.random.lognormal(par.theta_mean, par.theta_std, par.N_1)
+            new_cohort_ability = draw_fixed_ability(par, par.N_1)
             sol.ability[:len(generation), t + 1] = np.concatenate((new_cohort_ability, sol.ability[alive_mask, t]))
 
             new_cohort_theta_l = par.theta_l[0] + new_cohort_ability
@@ -274,7 +289,10 @@ def func_Ll(par, sol, t):
     return sum(theta_l_repeated)
 
 
-
+def draw_fixed_ability(par, num_individuals):
+    np.random.seed(42)  # Set a fixed seed for reproducibility
+    
+    return np.random.lognormal(par.theta_mean, par.theta_std, num_individuals)
 
 
 def constraints(par, sol, t, do_print=False):
