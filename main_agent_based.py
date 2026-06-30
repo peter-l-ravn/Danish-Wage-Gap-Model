@@ -26,7 +26,7 @@ class ModelClass(EconModelClass):
         par = self.par
 
         par.T = 20 # Periods to simulate
-        par.T_max = 10 # Max solver iterations
+        par.T_max = 100 # Max solver iterations
 
         par.N_1 = 1000 # New entrants per cohort
         par.n = 50 # Number of cohorts
@@ -76,16 +76,17 @@ class ModelClass(EconModelClass):
         sol.l_h = np.full((max_capacity, par.T_max), np.nan)
         sol.theta_l = np.full((max_capacity, par.T_max), np.nan)
         sol.theta_h = np.full((max_capacity, par.T_max), np.nan)
+        sol.ability = np.full((max_capacity, par.T_max), np.nan)
 
         sol.age[:par.N_1*par.n, 0] = np.repeat(np.arange(0, par.n, 1), par.N_1)
         sol.wage[:par.N_1*par.n, 0] = np.repeat(np.ones((1, par.n)), par.N_1)
         sol.l_h[:par.N_1*par.n, 0] = sol.age[:par.N_1*par.n, 0] > 50
         sol.l_h[par.N_1*par.n-2, 0] = True 
 
-        ability = np.random.lognormal(par.theta_mean, par.theta_std, par.N_1 * par.n)
+        sol.ability[:par.N_1*par.n, 0] = np.random.lognormal(par.theta_mean, par.theta_std, par.N_1 * par.n)
 
-        sol.theta_l[:par.N_1*par.n, 0] = np.repeat(par.theta_l, par.N_1) + ability
-        sol.theta_h[:par.N_1*par.n, 0] = np.repeat(par.theta_h, par.N_1) + ability
+        sol.theta_l[:par.N_1*par.n, 0] = np.repeat(par.theta_l, par.N_1) + sol.ability[:par.N_1*par.n, 0]
+        sol.theta_h[:par.N_1*par.n, 0] = np.repeat(par.theta_h, par.N_1) + sol.ability[:par.N_1*par.n, 0]
 
         
     def allocate_sim(self, T):
@@ -104,11 +105,36 @@ class ModelClass(EconModelClass):
         t = 0
         eps = np.inf
 
+
         for t in range(par.T_max - 1):
-
-            print(t)
-
+    
             calc_equilibrium(par, sol, t, par.T_max, do_print=do_print)
+
+            new_cohort_age = np.zeros(par.N_1)
+            old_cohort_age = sol.age[:, t] + 1
+
+            alive_mask = old_cohort_age < par.n
+
+            generation = np.concatenate((new_cohort_age, old_cohort_age[alive_mask]))
+
+            sol.age[:len(generation), t + 1] = generation
+
+            new_cohort_l_h = np.repeat(False, par.N_1)
+            sol.l_h[:len(generation), t + 1] = np.concatenate((new_cohort_l_h, sol.l_h[alive_mask, t]))
+
+            new_cohort_ability = np.random.lognormal(par.theta_mean, par.theta_std, par.N_1)
+            sol.ability[:len(generation), t + 1] = np.concatenate((new_cohort_ability, sol.ability[alive_mask, t]))
+
+            new_cohort_theta_l = par.theta_l[0] + new_cohort_ability
+            new_cohort_theta_h = par.theta_h[0] + new_cohort_ability
+
+            old_idx = old_cohort_age[alive_mask].astype(int)
+
+            old_cohort_theta_l = par.theta_l[old_idx] + sol.ability[alive_mask, t]
+            old_cohort_theta_h = par.theta_h[old_idx] + sol.ability[alive_mask, t]
+
+            sol.theta_l[:len(generation), t + 1] = np.concatenate((new_cohort_theta_l, old_cohort_theta_l))
+            sol.theta_h[:len(generation), t + 1] = np.concatenate((new_cohort_theta_h, old_cohort_theta_h))
 
 
 
@@ -143,17 +169,12 @@ class ModelClass(EconModelClass):
 
 def calc_equilibrium(par, sol, t, T, do_print=False):
 
-    sol.l_h[:par.N_1, t] = np.repeat(False, par.N_1)
-
-    ability = np.random.lognormal(par.theta_mean, par.theta_std, par.N_1)
-
-    sol.theta_l[:par.N_1, t] = par.theta_l[0] + ability
-    sol.theta_h[:par.N_1, t] = par.theta_h[0] + ability
+    population_size = np.count_nonzero(~np.isnan(sol.age[:, t]))
 
     a = 0
-    b = np.count_nonzero(~np.isnan(sol.age[:, t])) - 1
+    b = population_size - 1
 
-    x_star, f_star = golden_section_minimize_integer(par, sol, t, marginal_gain)
+    x_star, f_star = golden_section_minimize_integer(a, b, par, sol, t, marginal_gain)
 
     qualified_idx = int(x_star)
 
@@ -162,9 +183,10 @@ def calc_equilibrium(par, sol, t, T, do_print=False):
     qualification_sorted = np.argsort(sol.theta_h[valid, t])[::-1]
 
     promoted = qualification_sorted[:qualified_idx + 1] 
+    not_promoted = qualification_sorted[qualified_idx + 1:]
 
     sol.l_h[promoted, t] = True # Promote the top qualified_idx individuals to high-skilled labor
-    sol.l_h[~promoted, t] = False # Demote the rest to low-skilled labor
+    sol.l_h[not_promoted, t] = False # Demote the rest to low-skilled labor
 
     Lh = func_Lh(par, sol, t)
     Ll = func_Ll(par, sol, t)
@@ -172,16 +194,15 @@ def calc_equilibrium(par, sol, t, T, do_print=False):
     wage_h_target = wage_h(par, sol, t, dY_dLl(par, Ll, Lh))
     wage_l_target = wage_l(par, sol, t, dY_dLl(par, Ll, Lh))
 
-    sol.wage[sol.l_h[:par.N_1, t], t] = wage_h_target[:par.N_1]
-    sol.wage[~sol.l_h[:par.N_1, t], t] = wage_l_target[:par.N_1]
+    sol.wage[:par.N_1, t] = (sol.l_h[:par.N_1, t])*wage_h_target[:par.N_1] \
+                          + (1 - sol.l_h[:par.N_1, t])*wage_l_target[:par.N_1]
 
     if t == 0:
-        sol.wage[sol.l_h[par.N_1:, t], t] = par.phi*sol.wage_h[t, :-1] + (1 - par.phi)*wage_h_target[par.N_1:]
-        sol.wage_l[t, 1:] = par.phi*sol.wage_l[t, :-1] + (1 - par.phi)*wage_l_target[1:]
-     
+        sol.wage[par.N_1:population_size, t] = sol.l_h[par.N_1:population_size, t] * (par.phi*sol.wage[:(population_size - par.N_1), t] + (1 - par.phi)*wage_h_target[par.N_1:population_size]) \
+                              + (1 - sol.l_h[par.N_1:population_size, t]) * (par.phi*sol.wage[:(population_size - par.N_1), t] + (1 - par.phi)*wage_l_target[par.N_1:population_size])
     else:
-        sol.wage_h[t, 1:] = par.phi*sol.wage_h[t - 1, :-1] + (1 - par.phi)*wage_h_target[1:]
-        sol.wage_l[t, 1:] = par.phi*sol.wage_l[t - 1, :-1] + (1 - par.phi)*wage_l_target[1:]
+        sol.wage[par.N_1:population_size, t] = sol.l_h[par.N_1:population_size, t] * (par.phi*sol.wage[:(population_size - par.N_1), t - 1] + (1 - par.phi)*wage_h_target[par.N_1:population_size]) \
+                              + (1 - sol.l_h[par.N_1:population_size, t]) * (par.phi*sol.wage[:(population_size - par.N_1), t - 1] + (1 - par.phi)*wage_l_target[par.N_1:population_size])
 
 
 
@@ -192,9 +213,10 @@ def marginal_gain(qualified_idx, par, sol, t):
     qualification_sorted = np.argsort(sol.theta_h[valid, t])[::-1]
 
     promoted = qualification_sorted[:qualified_idx + 1] 
+    not_promoted = qualification_sorted[qualified_idx + 1:]
 
     sol.l_h[promoted, t] = True # Promote the top qualified_idx individuals to high-skilled labor
-    sol.l_h[~promoted, t] = False # Demote the rest to low-skilled labor
+    sol.l_h[not_promoted, t] = False # Demote the rest to low-skilled labor
 
     Lh = func_Lh(par, sol, t)
     Ll = func_Ll(par, sol, t)
@@ -239,6 +261,7 @@ def func_Lh(par, sol, t):
     l_hs = sol.l_h[valid, t].astype(bool)
 
     theta_h_repeated = sol.theta_h[valid, t][l_hs]
+        
 
     return sum(theta_h_repeated)
 

@@ -174,7 +174,7 @@ def brentq(f, a, b, args=(), xtol=1e-12, rtol=4.440892098500626e-16, maxiter=100
 
 
 
-def golden_section_minimize_integer(par, sol, t, f=None):
+def golden_section_minimize_integer(a, b, par, sol, t, f=None):
     """
     Integer-valued golden-section-like minimization on [0, n-1],
     where n is the number of non-NaN ages at time t.
@@ -196,8 +196,6 @@ def golden_section_minimize_integer(par, sol, t, f=None):
     if f is None:
         raise ValueError("Provide f(qualified_idx, par, sol, t).")
 
-    a = 0
-    b = np.count_nonzero(~np.isnan(sol.age[:, t])) - 1
 
     phi = (np.sqrt(5) - 1) / 2
 
