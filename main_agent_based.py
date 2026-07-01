@@ -1,4 +1,3 @@
-from main_new_prod import dY_dLh
 import numpy as np
 
 from EconModel import EconModelClass
@@ -25,6 +24,8 @@ class ModelClass(EconModelClass):
         # unpack
         par = self.par
 
+        par.tol = 1e-6 # Convergence tolerance
+
         par.T = 10 # Periods to simulate
         par.T_max = 50 # Max solver iterations
 
@@ -34,7 +35,7 @@ class ModelClass(EconModelClass):
         par.A =  100.0 # Total factor productivity
         par.alpha =  0.5 # Output elasticity of low-skilled labor
         par.mu =  1.1 # Wage premium for high-skilled labor
-        par.phi = 0.9 # Calvo parameter for wage adjustment
+        par.phi = 0.85 # Calvo parameter for wage adjustment
         par.c =  0.5 # Cost of hiring high-skilled labor
 
         par.theta_l = np.loadtxt('Exogenous_estimation/theta_l.csv', delimiter=',')
@@ -49,14 +50,21 @@ class ModelClass(EconModelClass):
 
         par.tenure_param = 0.1
 
+        par.fire_percentage = 1.0 # Percentage of high-skilled labor that can be fired each period
+
 
     def update_params(self):
-
         """ parameters to update iteratively """
 
 
     def allocate(self):
         """ allocate model """
+
+        self.allocate_sol()
+        self.gen_first_period()
+
+
+    def allocate_sol(self):
 
         # unpack
         par = self.par
@@ -68,10 +76,10 @@ class ModelClass(EconModelClass):
 
         sol.c_bar = np.full((par.T_max), np.nan)
 
-        max_capacity_factor = 1.1
-        max_capacity = 0
+        max_capacity_factor = 1.05
+        max_capacity = par.N_1
 
-        for age in range(par.n - 1):
+        for age in range(par.n):
             max_capacity += int(par.N_1 * par.rho[age] * max_capacity_factor)
 
         sol.age = np.full((max_capacity, par.T_max), np.nan)
@@ -81,24 +89,30 @@ class ModelClass(EconModelClass):
         sol.theta_l = np.full((max_capacity, par.T_max), np.nan)
         sol.theta_h = np.full((max_capacity, par.T_max), np.nan)
 
-        for age in range(par.n - 1):
-            num_individuals = int(par.N_1 * np.prod(par.rho[:age + 1]))
-            start_idx = int(sum(par.N_1 * np.prod(par.rho[:age]) for age in range(age)))
+
+    def gen_first_period(self):
+        
+        par = self.par
+        sol = self.sol
+
+        start_idx = 0
+        for age in range(par.n):
+            if age == 0:
+                num_individuals = par.N_1
+
+            else:
+                num_individuals = int(par.rho[age - 1] * num_individuals)
+                
             end_idx = start_idx + num_individuals
 
             sol.age[start_idx:end_idx, 0] = age
             sol.wage[start_idx:end_idx, 0] = 1.0
-            sol.l_h[start_idx:end_idx, 0] = age > 48
+            sol.l_h[start_idx:end_idx, 0] = age > 15
             sol.ability[start_idx:end_idx, 0] = draw_fixed_ability(par, num_individuals)
             sol.theta_l[start_idx:end_idx, 0] = par.theta_l[age] + sol.ability[start_idx:end_idx, 0]
             sol.theta_h[start_idx:end_idx, 0] = par.theta_h[age] + sol.ability[start_idx:end_idx, 0]
 
-
-
-
-        
-    def allocate_sim(self, T):
-        """ allocate simulation """
+            start_idx = end_idx
 
 
 
@@ -108,79 +122,46 @@ class ModelClass(EconModelClass):
         par = self.par
         sol = self.sol
 
-        self.allocate()
-
         t = 0
         eps = np.inf
 
 
-        for t in range(par.T_max - 1):
+        while t < (par.T_max - 1) and eps > par.tol:
     
             calc_equilibrium(par, sol, t, par.T_max, do_print=do_print)
 
-            new_cohort_age = np.zeros(par.N_1)
-            old_cohort_age = sol.age[:, t] + 1
+            law_of_motions(par, sol, t)
 
-            alive_mask = np.zeros_like(old_cohort_age, dtype=bool)
+            if t == 0:
+                eps = 10e+10
 
-            for age in range(1, par.n - 1):
-                idx = np.where(old_cohort_age == age)[0]
-                number_in_cohort = int(len(idx) * par.rho[age])
+            else:
+                eps = np.mean
 
-                alive_mask[idx[:number_in_cohort]] = True
-                alive_mask[idx[number_in_cohort:]] = False
+                means_prev = group_means(sol.wage[:, t - 1], sol.age[:, t - 1])
+                means_current = group_means(sol.wage[:, t], sol.age[:, t])
+                eps = np.max(np.abs(means_prev - means_current))
 
-            generation = np.concatenate((new_cohort_age, old_cohort_age[alive_mask]))
-
-            sol.age[:len(generation), t + 1] = generation
-
-            new_cohort_l_h = np.repeat(False, par.N_1)
-            sol.l_h[:len(generation), t + 1] = np.concatenate((new_cohort_l_h, sol.l_h[alive_mask, t]))
-
-            new_cohort_ability = draw_fixed_ability(par, par.N_1)
-            sol.ability[:len(generation), t + 1] = np.concatenate((new_cohort_ability, sol.ability[alive_mask, t]))
-
-            new_cohort_theta_l = par.theta_l[0] + new_cohort_ability
-            new_cohort_theta_h = par.theta_h[0] + new_cohort_ability
-
-            old_idx = old_cohort_age[alive_mask].astype(int)
-
-            old_cohort_theta_l = par.theta_l[old_idx] + sol.ability[alive_mask, t]
-            old_cohort_theta_h = par.theta_h[old_idx] + sol.ability[alive_mask, t]
-
-            sol.theta_l[:len(generation), t + 1] = np.concatenate((new_cohort_theta_l, old_cohort_theta_l))
-            sol.theta_h[:len(generation), t + 1] = np.concatenate((new_cohort_theta_h, old_cohort_theta_h))
+            t += 1
 
 
+            if do_print:
+                print(f"Iteration {t}: eps = {eps:.2e}")
 
-        # while t < (par.T_max - 1) and eps > par.tol:
+            if eps < par.tol:
+                if do_print:
+                    print(f"Convergence achieved at iteration {t} with eps = {eps:.2e}")
 
-        #     calc_equilibrium(par, sol, t, par.T_max, do_print=do_print)
-
-        #     if t == 0:
-        #         eps = 10e+10
-        #     else:
-        #         eps = max(abs(sol.wage_l[t - 1, :] - sol.wage_l[t, :]))
-
-        #     par.l_h_ss = sol.l_h[t, :].copy()
-        #     par.l_l_ss = sol.l_l[t, :].copy()
-        #     par.wage_h_ss = sol.wage_h[t, :].copy()
-        #     par.wage_l_ss = sol.wage_l[t, :].copy()
-        
-        #     t += 1
-
-        #     if eps < par.tol:
-        #         if do_print:
-        #             print(f"Convergence achieved at iteration {t} with eps = {eps:.2e}")
-
-        #     if t == (par.T_max - 1):
+            if t == (par.T_max - 2):
                 
-        #         if do_print:
-        #             print(f"Maximum iterations reached without convergence. Final eps = {eps:.2e}")
+                if do_print:
+                    print(f"Maximum iterations reached without convergence. Final eps = {eps:.2e}")
+
+            if t == par.T_max - 2 or eps < par.tol:
+                calc_equilibrium(par, sol, t, par.T_max)
 
 
 
-        
 
 def calc_equilibrium(par, sol, t, T, do_print=False):
 
@@ -193,7 +174,7 @@ def calc_equilibrium(par, sol, t, T, do_print=False):
 
     qualified_idx = int(x_star)
 
-    valid = ~np.isnan(sol.age[:, t])
+    valid = sol.l_h[:, t] == False
 
     qualification_sorted = np.argsort(sol.theta_h[valid, t])[::-1]
 
@@ -215,6 +196,7 @@ def calc_equilibrium(par, sol, t, T, do_print=False):
     if t == 0:
         sol.wage[par.N_1:population_size, t] = sol.l_h[par.N_1:population_size, t] * (par.phi*sol.wage[:(population_size - par.N_1), t] + (1 - par.phi)*wage_h_target[par.N_1:population_size]) \
                               + (1 - sol.l_h[par.N_1:population_size, t]) * (par.phi*sol.wage[:(population_size - par.N_1), t] + (1 - par.phi)*wage_l_target[par.N_1:population_size])
+
     else:
         sol.wage[par.N_1:population_size, t] = sol.l_h[par.N_1:population_size, t] * (par.phi*sol.wage[:(population_size - par.N_1), t - 1] + (1 - par.phi)*wage_h_target[par.N_1:population_size]) \
                               + (1 - sol.l_h[par.N_1:population_size, t]) * (par.phi*sol.wage[:(population_size - par.N_1), t - 1] + (1 - par.phi)*wage_l_target[par.N_1:population_size])
@@ -223,7 +205,7 @@ def calc_equilibrium(par, sol, t, T, do_print=False):
 
 def marginal_gain(qualified_idx, par, sol, t):
 
-    valid = ~np.isnan(sol.age[:, t])
+    valid = sol.l_h[:, t] == False
 
     qualification_sorted = np.argsort(sol.theta_h[valid, t])[::-1]
 
@@ -243,6 +225,52 @@ def marginal_gain(qualified_idx, par, sol, t):
     sol.l_h[valid, t] = False # Reset the high-skilled labor status for all individuals
 
     return diff ** 2
+
+
+def law_of_motions(par, sol, t):
+
+    new_cohort_age = np.zeros(par.N_1)
+    old_cohort_age = sol.age[:, t]
+
+    alive_mask = np.zeros_like(old_cohort_age, dtype=bool)
+    fired_mask = np.zeros_like(old_cohort_age, dtype=bool)
+
+    for age in range(0, par.n):
+        idx = np.where(old_cohort_age == age)[0]
+        alive_number = int(len(idx) * par.rho[age])
+
+        alive_mask[idx[:alive_number]] = True
+        alive_mask[idx[alive_number:]] = False
+
+        fired_number = int(len(idx) * par.rho[age] * (1 - par.fire_percentage))
+        fired_mask[idx[:fired_number]] = False
+        fired_mask[idx[fired_number:]] = True
+
+    old_cohort_age = old_cohort_age + 1
+
+    generation = np.concatenate((new_cohort_age, old_cohort_age[alive_mask]))
+
+    sol.age[:len(generation), t + 1] = generation
+
+    new_cohort_l_h = np.repeat(False, par.N_1)
+    old_cohort_l_h = sol.l_h[:, t].copy()
+    old_cohort_l_h[fired_mask] = False  # Fired individuals are demoted to low-skilled labor
+    sol.l_h[:len(generation), t + 1] = np.concatenate((new_cohort_l_h, old_cohort_l_h[alive_mask]))
+
+    new_cohort_ability = draw_fixed_ability(par, par.N_1)
+    sol.ability[:len(generation), t + 1] = np.concatenate((new_cohort_ability, sol.ability[alive_mask, t]))
+
+    new_cohort_theta_l = par.theta_l[0] + new_cohort_ability
+    new_cohort_theta_h = par.theta_h[0] + new_cohort_ability
+
+    old_idx = old_cohort_age[alive_mask].astype(int)
+
+    old_cohort_theta_l = par.theta_l[old_idx] + sol.ability[alive_mask, t]
+    old_cohort_theta_h = par.theta_h[old_idx] + sol.ability[alive_mask, t]
+
+    sol.theta_l[:len(generation), t + 1] = np.concatenate((new_cohort_theta_l, old_cohort_theta_l))
+    sol.theta_h[:len(generation), t + 1] = np.concatenate((new_cohort_theta_h, old_cohort_theta_h))
+
 
 
 
@@ -295,24 +323,19 @@ def draw_fixed_ability(par, num_individuals):
     return np.random.lognormal(par.theta_mean, par.theta_std, num_individuals)
 
 
-def constraints(par, sol, t, do_print=False):
 
-    if np.any(par.theta_h < par.theta_l):
-        if do_print:
-            display(Math(r'\theta_h > \theta_{\ell} \text{ does not apply for some cohorts}'))
-        return False
+def group_means(a, b):
+    mask = ~np.isnan(a) & ~np.isnan(b)
+    a = a[mask]
+    b = b[mask]
 
-    if par.mu < 1.0:
-        if do_print:
-            display(Math(r'\mu > 1 \text{ does not apply}'))
-        return False
+    groups = np.unique(b)
+    means = np.array([a[b == g].mean() for g in groups])
 
-    if np.any(sol.wage_h[t, :] / sol.wage_l[t, :] < 1.0):
-        if do_print:
-            display(Math(r'\mu > 1\text{ does not apply}'))
-        return False
+    return means
 
-    return True
+
+
 
 
 
