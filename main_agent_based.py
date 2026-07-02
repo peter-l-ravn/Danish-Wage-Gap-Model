@@ -1,5 +1,3 @@
-from xml.parsers.expat import model
-
 import numpy as np
 
 from EconModel import EconModelClass
@@ -26,7 +24,9 @@ class ModelClass(EconModelClass):
         # unpack
         par = self.par
 
-        par.tol = 1e-3 # Convergence tolerance
+        par.seed = 40
+
+        par.tol = 1e-2 # Convergence tolerance
 
         par.T = 10 # Periods to simulate
         par.T_max = 100 # Max solver iterations
@@ -62,6 +62,7 @@ class ModelClass(EconModelClass):
         """ allocate model """
 
         self.allocate_sol()
+        self.init_fixed_draws()
         self.gen_first_period()
 
 
@@ -90,6 +91,28 @@ class ModelClass(EconModelClass):
         sol.theta_l = np.full((max_capacity, par.T_max), np.nan)
         sol.theta_h = np.full((max_capacity, par.T_max), np.nan)
 
+        sol.age_ss = np.full((max_capacity), np.nan)
+        sol.wage_ss = np.full((max_capacity), np.nan)
+        sol.l_h_ss = np.full((max_capacity), np.nan)
+        sol.ability_ss = np.full((max_capacity), np.nan)
+        sol.theta_l_ss = np.full((max_capacity), np.nan)
+        sol.theta_h_ss = np.full((max_capacity), np.nan)
+
+    def init_fixed_draws(self):
+        par = self.par
+        sol = self.sol
+
+        rng_ability = np.random.default_rng(par.seed)
+        rng_reassign = np.random.default_rng(par.seed + 1)
+
+        # one fixed draw per potential individual slot
+        sol.ability_draws = rng_ability.lognormal(
+            mean=par.theta_mean,
+            sigma=par.theta_std,
+            size=sol.age.shape[0]
+        )
+
+        sol.reassign_priority = rng_reassign.random(sol.age.shape[0])
 
     def gen_first_period(self):
         
@@ -108,12 +131,14 @@ class ModelClass(EconModelClass):
 
             sol.age[start_idx:end_idx, 0] = age
             sol.wage[start_idx:end_idx, 0] = 1.0
-            sol.l_h[start_idx:end_idx, 0] = age < 3
-            sol.ability[start_idx:end_idx, 0] = draw_fixed_ability(par, num_individuals)
+
+            sol.ability[start_idx:end_idx, 0] = sol.ability_draws[start_idx:end_idx]
             sol.theta_l[start_idx:end_idx, 0] = par.theta_l[age] + sol.ability[start_idx:end_idx, 0]
             sol.theta_h[start_idx:end_idx, 0] = par.theta_h[age] + sol.ability[start_idx:end_idx, 0]
 
             start_idx = end_idx
+
+        sol.l_h[:end_idx, 0] = reassign_func(par, sol, 0, costum_percentage = 0.02)[:end_idx]
 
 
 
@@ -137,8 +162,6 @@ class ModelClass(EconModelClass):
                 eps = 10e+10
 
             else:
-                eps = np.mean
-
                 means_prev = group_means(sol.wage[:, t - 1], sol.age[:, t - 1])
                 means_current = group_means(sol.wage[:, t], sol.age[:, t])
                 eps = np.max(np.abs(means_prev - means_current))
@@ -150,6 +173,7 @@ class ModelClass(EconModelClass):
                 print(f"Iteration {t}: eps = {eps:.2e}")
 
             if eps < par.tol:
+
                 if do_print:
                     print(f"Convergence achieved at iteration {t} with eps = {eps:.2e}")
 
@@ -161,6 +185,15 @@ class ModelClass(EconModelClass):
             if t == par.T_max - 2 or eps < par.tol:
                 calc_equilibrium(par, sol, t, par.T_max)
 
+                sol.age_ss = sol.age[:, t]
+                sol.wage_ss = sol.wage[:, t]
+                sol.l_h_ss = sol.l_h[:, t]
+                sol.ability_ss = sol.ability[:, t]
+                sol.theta_l_ss = sol.theta_l[:, t]
+                sol.theta_h_ss = sol.theta_h[:, t]
+
+
+
 
 
 
@@ -168,33 +201,16 @@ def calc_equilibrium(par, sol, t, T, do_print=False):
 
     population_size = np.count_nonzero(~np.isnan(sol.age[:, t]))
 
-    reassigned_mask = np.zeros_like(sol.age[:, t], dtype=bool)
+    reassigned_mask = reassign_func(par, sol, t)
 
-    np.random.seed(42)   # Set a fixed seed for reproducibility
-
-    for age in range(par.n):
-        idx = np.where(sol.age[:, t] == age)[0]
-        reassigned_number = int(len(idx) * par.reassigned_percentage)
-
-        chosen = draw_fixed_chosen(idx, reassigned_number)
-        reassigned_mask[idx] = False
-        reassigned_mask[chosen] = True
+    sol.l_h[reassigned_mask, t] = False # All reassigned indivduals enter the labor market as low-skilled labor
 
     a = 0
     b = len(reassigned_mask[reassigned_mask]) - 1
 
     x_star, f_star = golden_section_int_modified(a, b, par, sol, t, marginal_gain)
 
-    qualified_idx = int(x_star)
-
-    idx = np.where(reassigned_mask)[0]
-    qualification_sorted = idx[np.argsort(sol.theta_h[idx, t])[::-1]]
-
-    promoted = qualification_sorted[:qualified_idx + 1] 
-    not_promoted = qualification_sorted[qualified_idx + 1:]
-
-    sol.l_h[promoted, t] = True # Promote the top qualified_idx individuals to high-skilled labor
-    sol.l_h[not_promoted, t] = False # Demote the rest to low-skilled labor
+    marginal_gain(x_star, par, sol, t)
 
     Lh = func_Lh(par, sol, t)
     Ll = func_Ll(par, sol, t)
@@ -219,17 +235,9 @@ def calc_equilibrium(par, sol, t, T, do_print=False):
 
 def marginal_gain(qualified_idx, par, sol, t):
 
-    reassigned_mask = np.zeros_like(sol.age[:, t], dtype=bool)
+    reassigned_mask = reassign_func(par, sol, t)
 
-    np.random.seed(42)   # Set a fixed seed for reproducibility
-
-    for age in range(par.n):
-        idx = np.where(sol.age[:, t] == age)[0]
-        reassigned_number = int(len(idx) * par.reassigned_percentage)
-
-        chosen = draw_fixed_chosen(idx, reassigned_number)
-        reassigned_mask[idx] = False
-        reassigned_mask[chosen] = True
+    sol.l_h[reassigned_mask, t] = False # Reset the high-skilled labor status for all individuals
 
     idx = np.where(reassigned_mask)[0]
 
@@ -249,8 +257,6 @@ def marginal_gain(qualified_idx, par, sol, t):
     K = np.nansum(sol.l_h[:, t])
 
     diff = (par.A/par.c) * (sol.theta_h[last_promoted, t]*dY_dLh(par, Ll, Lh) - par.mu*sol.theta_l[last_promoted, t]*dY_dLl(par, Ll, Lh)) - K  
-
-    sol.l_h[reassigned_mask, t] = False # Reset the high-skilled labor status for all individuals
 
     return diff
 
@@ -280,7 +286,7 @@ def law_of_motions(par, sol, t):
     old_cohort_l_h = sol.l_h[:, t]
     sol.l_h[:len(generation), t + 1] = np.concatenate((new_cohort_l_h, old_cohort_l_h[alive_mask]))
 
-    new_cohort_ability = draw_fixed_ability(par, par.N_1)
+    new_cohort_ability = sol.ability_draws[:par.N_1]
     sol.ability[:len(generation), t + 1] = np.concatenate((new_cohort_ability, sol.ability[alive_mask, t]))
 
     new_cohort_theta_l = par.theta_l[0] + new_cohort_ability
@@ -318,9 +324,7 @@ def wage_l(par, sol, t, dY_dLl):
     return par.A*sol.theta_l[valid, t]*dY_dLl
 
 def wage_h(par, sol, t, dY_dLl):
-    valid = ~np.isnan(sol.age[:, t])
-
-    return par.mu*par.A*sol.theta_l[valid, t]*dY_dLl
+    return par.mu*wage_l(par, sol, t, dY_dLl) # Individuals earn a markup of the low-skilled wage based on the parameter mu
 
 def func_Lh(par, sol, t):
     valid = ~np.isnan(sol.age[:, t])
@@ -340,14 +344,23 @@ def func_Ll(par, sol, t):
     return sum(theta_l_repeated)
 
 
-def draw_fixed_ability(par, num_individuals):
-    np.random.seed(42)  # Set a fixed seed for reproducibility
+
+def reassign_func(par, sol, t, costum_percentage = None):
+    reassigned_mask = np.zeros_like(sol.age[:, t], dtype=bool)
+
+
+    for age in range(par.n):
+        idx = np.where(sol.age[:, t] == age)[0]
+        if costum_percentage is not None:
+            reassigned_number = int(len(idx) * costum_percentage)
+        else:
+            reassigned_number = int(len(idx) * par.reassigned_percentage)
     
-    return np.random.lognormal(par.theta_mean, par.theta_std, num_individuals)
+        chosen = idx[np.argsort(sol.reassign_priority[idx])[:reassigned_number]]
+        reassigned_mask[idx] = False
+        reassigned_mask[chosen] = True
 
-def draw_fixed_chosen(idx, reassigned_number):
-
-    return np.random.choice(idx, size=reassigned_number, replace=False)
+    return reassigned_mask
 
 
 def group_means(a, b):
