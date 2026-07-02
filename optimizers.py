@@ -173,31 +173,49 @@ def brentq(f, a, b, args=(), xtol=1e-12, rtol=4.440892098500626e-16, maxiter=100
     raise RuntimeError("Maximum iterations exceeded")
 
 
-
-def golden_section_minimize_integer(a, b, par, sol, t, f=None):
+def golden_section_int_modified(a, b, par, sol, t, f=None):
     """
-    Integer-valued golden-section-like minimization on [0, n-1],
-    where n is the number of non-NaN ages at time t.
+    Integer-valued golden-section-like search on [a, b].
 
-    Parameters
-    ----------
-    par, sol, t :
-        Passed through to f.
-    f : callable
-        Function of the form f(qualified_idx, par, sol, t).
-
-    Returns
-    -------
-    x_star : int
-        Minimizer.
-    f_star : float
-        Function value at minimizer.
+    Rule:
+    1. Prefer positive values.
+    2. Among positive values, choose the one closest to zero.
+    3. If no positive values exist, choose the non-positive value closest to zero.
     """
     if f is None:
         raise ValueError("Provide f(qualified_idx, par, sol, t).")
 
+    if a > b:
+        a, b = b, a
 
     phi = (np.sqrt(5) - 1) / 2
+    cache = {}
+
+    best_pos_x = None
+    best_pos_f = np.inf
+
+    best_nonpos_x = None
+    best_nonpos_f = -np.inf
+
+    def register(x, fx):
+        nonlocal best_pos_x, best_pos_f, best_nonpos_x, best_nonpos_f
+
+        if np.isnan(fx):
+            raise ValueError(f"f({x}, par, sol, t) returned NaN.")
+
+        if fx > 0 and fx < best_pos_f:
+            best_pos_x = x
+            best_pos_f = fx
+
+        if fx <= 0 and fx > best_nonpos_f:
+            best_nonpos_x = x
+            best_nonpos_f = fx
+
+    def eval_f(x):
+        x = int(x)
+        if x not in cache:
+            cache[x] = f(x, par, sol, t)
+        return cache[x]
 
     while b - a > 2:
         c = a + int(np.floor((1 - phi) * (b - a)))
@@ -206,16 +224,58 @@ def golden_section_minimize_integer(a, b, par, sol, t, f=None):
         if c == d:
             break
 
-        fc = f(c, par, sol, t)
-        fd = f(d, par, sol, t)
+        fa = eval_f(a)
+        fb = eval_f(b)
 
-        if fc > fd:
-            a = c
+        register(a, fa)
+        register(b, fb)
+
+        if np.sign(fa) == np.sign(fb):
+
+            if fa == 0 and fb == 0:
+                break
+
+            if fa < 0:
+                # both negative: keep the side closer to zero
+                if fb > fa:
+                    a = c
+                else:
+                    b = d
+
+            elif fa > 0:
+                # both positive: keep the side closer to zero
+                if fb < fa:
+                    a = c
+                else:
+                    b = d
+
         else:
-            b = d
+            fc = eval_f(c)
+            fd = eval_f(d)
 
-    xs = np.arange(a, b + 1)
-    vals = np.array([f(x, par, sol, t) for x in xs])
-    i = np.argmin(vals)
-    
-    return int(xs[i]), vals[i]
+            register(c, fc)
+            register(d, fd)
+
+            if np.sign(fc) > 0 and np.sign(fd) > 0:
+                if fc < fd:
+                    b = c
+                else:
+                    a = d
+
+            else:
+                if np.sign(fc) > 0 and np.sign(fd) < 0:
+                    a = c
+                else:
+                    b = d
+
+    for x in range(int(a), int(b) + 1):
+        fx = eval_f(x)
+        register(x, fx)
+
+    if best_pos_x is not None:
+        return best_pos_x, best_pos_f
+
+    if best_nonpos_x is not None:
+        return best_nonpos_x, best_nonpos_f
+
+    raise ValueError("No valid points found in the interval.")
