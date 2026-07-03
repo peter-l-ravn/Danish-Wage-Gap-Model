@@ -67,7 +67,7 @@ class ModelClass(EconModelClass):
 
         self.allocate_sol()
         self.init_fixed_draws()
-        self.gen_first_period()
+        
 
 
     def allocate_sol(self):
@@ -84,7 +84,7 @@ class ModelClass(EconModelClass):
 
         max_capacity = int(par.N_1 * par.n)
 
-        sol.age = np.full((max_capacity, par.T_max), np.nan)
+        sol.age = np.full((max_capacity, par.T_max), -1, dtype=np.int64)
         sol.wage = np.full((max_capacity, par.T_max), np.nan)
         sol.l_h = np.full((max_capacity, par.T_max), np.nan)
         sol.ability = np.full((max_capacity, par.T_max), np.nan)
@@ -151,12 +151,15 @@ class ModelClass(EconModelClass):
         # a. unpack
         
         with jit(self) as model:
+
+            self.gen_first_period()
+
             par = model.par
             sol = model.sol
 
             find_ss(par, sol, do_print=do_print)
 
-
+@jit_if_enabled()
 def find_ss(par, sol, do_print=False):
 
     t = 0
@@ -203,9 +206,10 @@ def find_ss(par, sol, do_print=False):
             sol.theta_h_ss[:] = sol.theta_h[:, t]
 
 
+@jit_if_enabled()
 def calc_equilibrium(par, sol, t, T, do_print=False):
 
-    population_size = np.count_nonzero(~np.isnan(sol.age[:, t]))
+    population_size = len(sol.age[:, t])
 
     reassigned_mask = reassign_func(par, sol, t)
 
@@ -220,7 +224,7 @@ def calc_equilibrium(par, sol, t, T, do_print=False):
 
     x_star, f_star = golden_section_int_modified(a, b, marginal_gain, par, sol, t, reassigned_mask, qualification_sorted)
 
-    marginal_gain(x_star, par, sol, t, reassigned_mask, qualification_sorted)
+    marginal_gain(int(x_star), par, sol, t, reassigned_mask, qualification_sorted)
 
     Lh = func_Lh(par, sol, t)
     Ll = func_Ll(par, sol, t)
@@ -242,6 +246,8 @@ def calc_equilibrium(par, sol, t, T, do_print=False):
                               + (1 - sol.l_h[old_cohort_idx, t]) * (~reassigned_mask[old_cohort_idx]*sol.wage[:(population_size - par.N_1), t - 1] + reassigned_mask[old_cohort_idx]*wage_l_target[old_cohort_idx])
 
 
+
+@jit_if_enabled()
 def marginal_gain(qualified_idx, par, sol, t, reassigned_mask, qualification_sorted):
 
     sol.l_h[reassigned_mask, t] = False # Reset the high-skilled labor status for all individuals
@@ -263,6 +269,7 @@ def marginal_gain(qualified_idx, par, sol, t, reassigned_mask, qualification_sor
 
     return diff
 
+@jit_if_enabled()
 def law_of_motions(par, sol, t):
 
     sol.age[:, t + 1] = sol.age[:, t]
@@ -273,60 +280,58 @@ def law_of_motions(par, sol, t):
     sol.ability[par.N_1:, t + 1] = sol.ability[:-par.N_1, t] # Old cohort retains their ability
     sol.ability[:par.N_1, t + 1] = sol.ability_draws[:par.N_1]  # New cohort draws new abilities
 
-    sol.theta_l[par.N_1:, t + 1] = par.theta_l[sol.age[par.N_1:, t + 1].astype(int)] + sol.ability[par.N_1:, t + 1] 
+    sol.theta_l[par.N_1:, t + 1] = par.theta_l[sol.age[par.N_1:, t + 1]] + sol.ability[par.N_1:, t + 1] 
     sol.theta_l[:par.N_1, t + 1] = par.theta_l[0] + sol.ability[:par.N_1, t + 1]  # New cohort uses the first age's theta_l
 
-    sol.theta_h[par.N_1:, t + 1] = par.theta_h[sol.age[par.N_1:, t + 1].astype(int)] + sol.ability[par.N_1:, t + 1]
+    sol.theta_h[par.N_1:, t + 1] = par.theta_h[sol.age[par.N_1:, t + 1]] + sol.ability[par.N_1:, t + 1]
     sol.theta_h[:par.N_1, t + 1] = par.theta_h[0] + sol.ability[:par.N_1, t + 1]  # New cohort uses the first age's theta_h
 
-    sol.mass[par.N_1:, t + 1] = sol.mass[:-par.N_1, t] * par.rho[sol.age[par.N_1:, t + 1].astype(int)] # Old cohort's mass adjusted by survival probability
+    sol.mass[par.N_1:, t + 1] = sol.mass[:-par.N_1, t] * par.rho[sol.age[par.N_1:, t + 1]] # Old cohort's mass adjusted by survival probability
     sol.mass[:par.N_1, t + 1] = 1.0
 
 
 
-
+@jit_if_enabled()
 def dY_dLl(par, Ll, Lh):
     return par.alpha*(Ll)**(par.alpha-1)*(Lh)**(1-par.alpha)
 
-
+@jit_if_enabled()
 def d2Y_dLl2(par, Ll, Lh):
     return par.alpha*(par.alpha - 1)*(Ll)**(par.alpha - 2)*(Lh)**(1 - par.alpha)
 
-
+@jit_if_enabled()
 def dY_dLh(par, Ll, Lh):
     return (1 - par.alpha)*(Ll)**(par.alpha)*(Lh)**(- par.alpha)
 
-
+@jit_if_enabled()
 def d2Y_dLh2(par, Ll, Lh):
     return (-par.alpha)*(1 - par.alpha)*(Ll)**(par.alpha)*(Lh)**(-par.alpha - 1)
 
-
+@jit_if_enabled()
 def d2Y_dLl_dLh(par, Ll, Lh):
     return par.alpha*(1 - par.alpha)*(Ll)**(par.alpha - 1)*(Lh)**(-par.alpha)
 
-
+@jit_if_enabled()
 def wage_l(par, sol, t, dY_dLl):
-    valid = ~np.isnan(sol.age[:, t])
 
-    return par.A*sol.theta_l[valid, t]*dY_dLl
+    return par.A*sol.theta_l[:, t]*dY_dLl
 
+@jit_if_enabled()
 def wage_h(par, sol, t, dY_dLl):
     return par.mu*wage_l(par, sol, t, dY_dLl) # Individuals earn a markup of the low-skilled wage based on the parameter mu
 
-
+@jit_if_enabled()
 def func_Lh(par, sol, t):
-
     return np.nansum(sol.theta_h[:, t] * sol.l_h[:, t] * sol.mass[:, t])
 
-
+@jit_if_enabled()
 def func_Ll(par, sol, t):
-
     return np.nansum(sol.theta_l[:, t] * (1 - sol.l_h[:, t]) * sol.mass[:, t])
 
 
-
+@jit_if_enabled()
 def reassign_func(par, sol, t, costum_percentage = -1.0):
-    reassigned_mask = np.zeros_like(sol.age[:, t], dtype=bool)
+    reassigned_mask = np.zeros(sol.age.shape[0], dtype=np.bool_)
 
     for age in range(par.n):
         idx = np.where(sol.age[:, t] == age)[0]
@@ -341,7 +346,7 @@ def reassign_func(par, sol, t, costum_percentage = -1.0):
 
     return reassigned_mask
 
-
+@jit_if_enabled()
 def group_means(a, b):
     mask = ~np.isnan(a) & ~np.isnan(b)
     a = a[mask]

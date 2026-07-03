@@ -7,7 +7,7 @@ from consav.grids import nonlinspace
 from consav.linear_interp import interp_1d, interp_1d_vec
 from consav.quadrature import log_normal_gauss_hermite
 
-from optimizer import optimizer
+from Old_models.optimizer import optimizer
 
 from IPython.display import display, Math
 
@@ -148,13 +148,6 @@ class ModelClass(EconModelClass):
 
             t += 1
 
-            if eps < par.tol:
-                if do_print:
-                    print(f"Convergence achieved at iteration {t} with eps = {eps:.2e}")
-
-            if t == (par.T_max - 1):
-                if do_print:
-                    print(f"Maximum iterations reached without convergence. Final eps = {eps:.2e}")
 
 
     def simulate_par_shock(self, parameter_names, parameter_values, single_period_shock=False):
@@ -226,6 +219,7 @@ class ModelClass(EconModelClass):
 
 
 
+
     def average_wage_change(self, print_components=False):
         par = self.par
         sim = self.sim
@@ -243,25 +237,26 @@ class ModelClass(EconModelClass):
 
         sim.K[t] = sim.l_h_o[t] + sim.l_h_y[t]
 
-        Lh = func_Lh(par, sim, t)
-        Ll = func_Ll(par, sim, t)
+        Lo = func_Lo(par, sim, t)
+        Ly = func_Ly(par, sim, t)
 
-        sim.wage_h_y[t] = wage_h_y(par, dY_dLl(par, Lh, Ll))
-        sim.wage_l_y[t] = wage_l_y(par, dY_dLl(par, Lh, Ll))
+        sim.wage_h_y[t] = wage_h_y(par, dY_dLy(par, Ly, Lo))
+        sim.wage_l_y[t] = wage_l_y(par, dY_dLy(par, Ly, Lo))
 
-        sim.c_bar[t] = par.A*(par.theta_h_y - par.mu_y*par.theta_l_y)*d2Y_dLl_dLh(par, Ll, Lh)*par.theta_h_o
+        sim.c_bar[t] = par.A*(par.theta_h_y - par.mu_y*par.theta_l_y)*d2Y_dLy_dLo(par, Ly, Lo)*par.theta_h_o
 
-        sim.avg_wage[t, :] = sim.wage_l[t, :]*sim.l_l[t, :]/(sim.l_l[t, :] + sim.l_h[t, :]) + sim.wage_h[t, :]*sim.l_h[t, :]/(sim.l_l[t, :] + sim.l_h[t, :])
+        sim.avg_wage_young[t] = sim.wage_l_y[t]*sim.l_l_y[t]/(sim.l_l_y[t] + sim.l_h_y[t]) + sim.wage_h_y[t]*sim.l_h_y[t]/(sim.l_l_y[t] + sim.l_h_y[t])
+        sim.avg_wage_old[t] = sim.wage_l_o[t]*sim.l_l_o[t]/(sim.l_l_o[t] + sim.l_h_o[t]) + sim.wage_h_o[t]*sim.l_h_o[t]/(sim.l_l_o[t] + sim.l_h_o[t])
 
-        # print(d2Y_dLl2(par, Ll, Lh)*(par.theta_h_y - par.theta_l_y)) # All correct sign here
-        # print(dK_dlhy_prev(par, Ll, Lh) - par.rho_h) # All correct sign here
-        # print(d2Y_dLl_dLh(par, Ll, Lh)*par.theta_h_o*par.rho_h) # All correct sign here
 
-        return d_avg_wy_dhy(par, sim, t, Ll, Lh, print_components=print_components)
+        # print(d2Y_dLy2(par, Ly, Lo)*(par.theta_h_y - par.theta_l_y)) # All correct sign here
+        # print(dK_dlhy_prev(par, Ly, Lo) - par.rho_h) # All correct sign here
+        # print(d2Y_dLy_dLo(par, Ly, Lo)*par.theta_h_o*par.rho_h) # All correct sign here
+
+        return d_avg_wy_dhy(par, sim, t, Ly, Lo, print_components=print_components)
 
 
 def calc_equilibrium(par, sol, t, a, b, T, do_print=False):
-
 
     sol.l_h_y[t] = optimizer(obj_function, a, b, args=(par, sol, t), tol=1e-6)
 
@@ -269,13 +264,13 @@ def calc_equilibrium(par, sol, t, a, b, T, do_print=False):
 
     sol.K[t] = sol.l_h_o[t] + sol.l_h_y[t]
 
-    Lh = func_Lh(par, sol, t)
-    Ll = func_Ll(par, sol, t)
+    Lo = func_Lo(par, sol, t)
+    Ly = func_Ly(par, sol, t)
 
-    sol.wage_h_y[t] = wage_h_y(par, dY_dLl(par, Ll, Lh))
-    sol.wage_l_y[t] = wage_l_y(par, dY_dLl(par, Ll, Lh))
+    sol.wage_h_y[t] = wage_h_y(par, dY_dLy(par, Ly, Lo))
+    sol.wage_l_y[t] = wage_l_y(par, dY_dLy(par, Ly, Lo))
 
-    sol.c_bar[t] = par.A*(par.theta_h_y - par.mu_y*par.theta_l_y)*d2Y_dLl_dLh(par, Ll, Lh)*par.theta_h_o
+    sol.c_bar[t] = par.A*(par.theta_h_y - par.mu_y*par.theta_l_y)*d2Y_dLy_dLo(par, Ly, Lo)*par.theta_h_o
 
     sol.avg_wage_young[t] = sol.wage_l_y[t]*sol.l_l_y[t]/(sol.l_l_y[t] + sol.l_h_y[t]) + sol.wage_h_y[t]*sol.l_h_y[t]/(sol.l_l_y[t] + sol.l_h_y[t])
     sol.avg_wage_old[t] = sol.wage_l_o[t]*sol.l_l_o[t]/(sol.l_l_o[t] + sol.l_h_o[t]) + sol.wage_h_o[t]*sol.l_h_o[t]/(sol.l_l_o[t] + sol.l_h_o[t])
@@ -293,109 +288,68 @@ def calc_equilibrium(par, sol, t, a, b, T, do_print=False):
 
 
 def obj_function(l_h_y, par, sol, t):
-    # diff = ((par.A*par.alpha*(par.theta_l_y*par.N_y + (par.theta_h_y - par.theta_l_y)*l_h_y)**(par.alpha - 1) \
-    #         *func_Lh(par, sol, t)**(1-par.alpha)) / par.c) \
-    #         *(par.theta_h_y - par.mu_y*par.theta_l_y) - sol.l_h_o[t] - l_h_y
-
-    l_l_y = par.N_y - l_h_y
-
-    Lh = par.theta_h_o * sol.l_h_o[t] + par.theta_h_y * l_h_y
-    Ll = par.theta_l_o * sol.l_l_o[t] + par.theta_l_y * l_l_y
-
-    K = sol.l_h_o[t] + l_h_y
-
-    diff = (par.A/par.c) * (par.theta_h_y*dY_dLh(par, Ll, Lh) - par.mu_y*par.theta_l_y*dY_dLl(par, Ll, Lh)) - K
+    diff = ((par.A*par.alpha*(par.theta_l_y*par.N_y + (par.theta_h_y - par.theta_l_y)*l_h_y)**(par.alpha - 1) \
+            *func_Lo(par, sol, t)**(1-par.alpha)) / par.c) \
+            *(par.theta_h_y - par.mu_y*par.theta_l_y) - sol.l_h_o[t] - l_h_y
     
     return diff**2
 
-def dY_dLl(par, Ll, Lh):
-    return par.alpha*(Ll)**(par.alpha-1)*(Lh)**(1-par.alpha)
+def dY_dLy(par, Ly, Lo):
+    return par.alpha*(Ly)**(par.alpha-1)*(Lo)**(1-par.alpha)
 
-def d2Y_dLl2(par, Ll, Lh):
-    return par.alpha*(par.alpha - 1)*(Ll)**(par.alpha - 2)*(Lh)**(1 - par.alpha)
+def d2Y_dLy2(par, Ly, Lo):
+    return par.alpha*(par.alpha - 1)*(Ly)**(par.alpha - 2)*(Lo)**(1 - par.alpha)
 
-def dY_dLh(par, Ll, Lh):
-    return (1 - par.alpha)*(Ll)**(par.alpha)*(Lh)**(- par.alpha)
+def dY_dLo(par, Ly, Lo):
+    return (1 - par.alpha)*(Ly)**(par.alpha)*(Lo)**(- par.alpha)
 
-def d2Y_dLh2(par, Ll, Lh):
-    return (-par.alpha)*(1 - par.alpha)*(Ll)**(par.alpha)*(Lh)**(-par.alpha - 1)
+def d2Y_dLo2(par, Ly, Lo):
+    return (-par.alpha)*(1 - par.alpha)*(Ly)**(par.alpha)*(Lo)**(-par.alpha - 1)
 
-def d2Y_dLl_dLh(par, Ll, Lh):
-    return par.alpha*(1 - par.alpha)*(Ll)**(par.alpha - 1)*(Lh)**(-par.alpha)
+def d2Y_dLy_dLo(par, Ly, Lo):
+    return par.alpha*(1 - par.alpha)*(Ly)**(par.alpha - 1)*(Lo)**(-par.alpha)
 
-def wage_l_y(par, dY_dLl):
-    return par.A*par.theta_l_y*dY_dLl
+def wage_l_y(par, dY_dLy):
+    return par.A*par.theta_l_y*dY_dLy
 
-def wage_h_y(par, dY_dLl):
-    return par.mu_y*par.A*par.theta_l_y*dY_dLl
+def wage_h_y(par, dY_dLy):
+    return par.mu_y*par.A*par.theta_l_y*dY_dLy
 
-def func_Lh(par, sol, t):
-    return par.theta_h_o*sol.l_h_o[t] + par.theta_h_y*sol.l_h_y[t]
+def func_Lo(par, sol, t):
+    return par.theta_h_o*sol.l_h_o[t] + par.theta_l_o*sol.l_l_o[t]
 
-def func_Ll(par, sol, t):
-    return par.theta_l_o*sol.l_l_o[t] + par.theta_l_y*sol.l_l_y[t]
+def func_Ly(par, sol, t):
+    return par.theta_h_y*sol.l_h_y[t] + par.theta_l_y*sol.l_l_y[t]
 
-def d2Y_dLl2(par, Ll, Lh):
-    return par.alpha * (par.alpha - 1) * Ll**(par.alpha - 2) * Lh**(1 - par.alpha)
+def dK_dlhy_prev(par, Ly, Lo,):
+    return par.A*(par.theta_h_y - par.mu_y*par.theta_l_y) \
+                    / (par.c - par.A*(par.theta_h_y - par.mu_y*par.theta_l_y)*d2Y_dLy2(par, Ly, Lo)*(par.theta_h_y - par.theta_l_y)) \
+                    * (d2Y_dLy_dLo(par, Ly, Lo)*par.theta_h_o - d2Y_dLy2(par, Ly, Lo)*(par.theta_h_y - par.theta_l_y))*par.rho_h
 
-def d2Y_dLh2(par, Ll, Lh):
-    return -par.alpha * (1 - par.alpha) * Ll**par.alpha * Lh**(-par.alpha - 1)
+def dLy_dlhy_prev(par, Ly, Lo):
+    return (par.theta_h_y - par.theta_l_y)*(dK_dlhy_prev(par, Ly, Lo) - par.rho_h)
 
-def d2Y_dLl_dLh(par, Ll, Lh):
-    return par.alpha * (1 - par.alpha) * Ll**(par.alpha - 1) * Lh**(-par.alpha)
+def dLo_dlhy_prev(par):
+    return par.theta_h_o*par.rho_h
 
-
-def dK_dlhy_prev(par, Ll, Lh):
-    M = (
-        par.theta_h_y**2 * d2Y_dLh2(par, Ll, Lh)
-        - (par.mu_y + 1) * par.theta_h_y * par.theta_l_y * d2Y_dLl_dLh(par, Ll, Lh)
-        + par.mu_y * par.theta_l_y**2 * d2Y_dLl2(par, Ll, Lh)
-    )
-
-    N = (
-        (par.mu_y + 1) * par.theta_h_y * par.theta_l_y * d2Y_dLl_dLh(par, Ll, Lh)
-        - par.theta_h_o * par.mu_y * par.theta_l_y * d2Y_dLl_dLh(par, Ll, Lh)
-        - par.mu_y * par.theta_l_y**2 * d2Y_dLl2(par, Ll, Lh)
-        + (par.theta_h_o - par.theta_h_y) * par.theta_h_y * d2Y_dLh2(par, Ll, Lh)
-    )
-
-    return par.rho_h * par.A * N / (par.c - par.A * M)
+def dlhy_dlhy_prev(par, Ly, Lo):
+    return dK_dlhy_prev(par, Ly, Lo) - par.rho_h
 
 
-def dLl_dlhy_prev(par, Ll, Lh):
-    return (par.theta_h_y - par.theta_l_y) * (dK_dlhy_prev(par, Ll, Lh) - par.rho_h)
+def dwly_dlhy_prev(par, Ly, Lo):
+    return par.A*par.theta_l_y*(d2Y_dLy2(par, Ly, Lo)*(par.theta_h_y - par.theta_l_y)*(dK_dlhy_prev(par, Ly, Lo) - par.rho_h) + d2Y_dLy_dLo(par, Ly, Lo)*par.theta_h_o*par.rho_h)
 
-
-def dLh_dlhy_prev(par):
-    return par.theta_h_o * par.rho_h
-
-
-def dlhy_dlhy_prev(par, Ll, Lh):
-    return dK_dlhy_prev(par, Ll, Lh) - par.rho_h
-
-
-def dwLl_dlhy_prev(par, Ll, Lh):
-    return par.A * par.theta_l_y * (
-        d2Y_dLh2(par, Ll, Lh) * (par.theta_l_y * (par.rho_h - dK_dlhy_prev(par, Ll, Lh)) + d2Y_dLl_dLh(par, Ll, Lh) * (par.theta_h_y*dK_dlhy_prev(par, Ll, Lh) + par.rho_h*(par.theta_h_o - par.theta_h_y)))
-    )
-
-
-def d_avg_wy_dhy(par, sol, t, Ll, Lh, print_components=False):
-    Ll = func_Ll(par, sol, t)
-    Lh = func_Lh(par, sol, t)
-
-    career = (par.mu_y - 1) / par.N_y * sol.wage_l_y[t] * dlhy_dlhy_prev(par, Ll, Lh)
-    level = ((par.mu_y - 1) * sol.l_h_y[t] / par.N_y + 1) * dwLl_dlhy_prev(par, Ll, Lh)
+def d_avg_wy_dhy(par, sol, t, Ly, Lo, print_components=False):
+    ly = sol.l_l_y[t] + sol.l_h_y[t]
+    
+    career = 1/ly*(par.mu_y - 1)*sol.wage_l_y[t]*dlhy_dlhy_prev(par, Ly, Lo)
+    level = (1/ly*(par.mu_y - 1)*sol.l_h_y[t] + 1)*dwly_dlhy_prev(par, Ly, Lo)
 
     if print_components:
-        print("Career spillovers", career)
-        print("Wage level", level)
+        print("Career spillovers", 1/ly*(par.mu_y - 1)*sol.wage_l_y[t]*dlhy_dlhy_prev(par, Ly, Lo))
+        print("Wage level", (1/ly*(par.mu_y - 1)*sol.l_h_y[t] + 1)*dwly_dlhy_prev(par, Ly, Lo))
 
     return career + level, career, level
-
-
-
-
 
 
 def constraints(par, sol, t, do_print=False):

@@ -7,7 +7,7 @@ from consav.grids import nonlinspace
 from consav.linear_interp import interp_1d, interp_1d_vec
 from consav.quadrature import log_normal_gauss_hermite
 
-from optimizer import optimizer
+from Old_models.optimizer import optimizer
 
 from IPython.display import display, Math
 

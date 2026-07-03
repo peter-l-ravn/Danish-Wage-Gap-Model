@@ -174,7 +174,7 @@ def brentq(f, a, b, args=(), xtol=1e-12, rtol=4.440892098500626e-16, maxiter=100
 
     raise RuntimeError("Maximum iterations exceeded")
 
-
+@jit_if_enabled()
 def golden_section_int_modified(a, b, f, *args):
     """
     Integer-valued golden-section-like search on [a, b].
