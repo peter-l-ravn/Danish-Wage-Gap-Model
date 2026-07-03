@@ -173,7 +173,9 @@ def brentq(f, a, b, args=(), xtol=1e-12, rtol=4.440892098500626e-16, maxiter=100
     raise RuntimeError("Maximum iterations exceeded")
 
 
-def golden_section_int_modified(a, b, par, sol, t, f=None):
+import numpy as np
+
+def golden_section_int_modified(a, b, f, *args):
     """
     Integer-valued golden-section-like search on [a, b].
 
@@ -183,7 +185,7 @@ def golden_section_int_modified(a, b, par, sol, t, f=None):
     3. If no positive values exist, choose the non-positive value closest to zero.
     """
     if f is None:
-        raise ValueError("Provide f(qualified_idx, par, sol, t).")
+        raise ValueError("Provide a callable f(x, *args).")
 
     if a > b:
         a, b = b, a
@@ -201,7 +203,7 @@ def golden_section_int_modified(a, b, par, sol, t, f=None):
         nonlocal best_pos_x, best_pos_f, best_nonpos_x, best_nonpos_f
 
         if np.isnan(fx):
-            raise ValueError(f"f({x}, par, sol, t) returned NaN.")
+            raise ValueError(f"f({x}, *args) returned NaN.")
 
         if fx > 0 and fx < best_pos_f:
             best_pos_x = x
@@ -214,7 +216,7 @@ def golden_section_int_modified(a, b, par, sol, t, f=None):
     def eval_f(x):
         x = int(x)
         if x not in cache:
-            cache[x] = f(x, par, sol, t)
+            cache[x] = f(x, *args)
         return cache[x]
 
     while b - a > 2:
@@ -231,19 +233,16 @@ def golden_section_int_modified(a, b, par, sol, t, f=None):
         register(b, fb)
 
         if np.sign(fa) == np.sign(fb):
-
             if fa == 0 and fb == 0:
                 break
 
             if fa < 0:
-                # both negative: keep the side closer to zero
                 if fb > fa:
                     a = c
                 else:
                     b = d
 
             elif fa > 0:
-                # both positive: keep the side closer to zero
                 if fb < fa:
                     a = c
                 else:
@@ -261,7 +260,6 @@ def golden_section_int_modified(a, b, par, sol, t, f=None):
                     b = c
                 else:
                     a = d
-
             else:
                 if np.sign(fc) > 0 and np.sign(fd) < 0:
                     a = c

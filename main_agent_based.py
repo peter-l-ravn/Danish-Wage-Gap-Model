@@ -177,12 +177,12 @@ class ModelClass(EconModelClass):
                 if do_print:
                     print(f"Convergence achieved at iteration {t} with eps = {eps:.2e}")
 
-            if t == (par.T_max - 2):
+            if t == (par.T_max - 1):
                 
                 if do_print:
                     print(f"Maximum iterations reached without convergence. Final eps = {eps:.2e}")
 
-            if t == par.T_max - 2 or eps < par.tol:
+            if t == par.T_max - 1 or eps < par.tol:
                 calc_equilibrium(par, sol, t, par.T_max)
 
                 sol.age_ss = sol.age[:, t]
@@ -203,14 +203,18 @@ def calc_equilibrium(par, sol, t, T, do_print=False):
 
     reassigned_mask = reassign_func(par, sol, t)
 
+    idx = np.where(reassigned_mask)[0]
+
+    qualification_sorted = idx[np.argsort(sol.theta_h[idx, t])[::-1]]
+
     sol.l_h[reassigned_mask, t] = False # All reassigned indivduals enter the labor market as low-skilled labor
 
     a = 0
     b = len(reassigned_mask[reassigned_mask]) - 1
 
-    x_star, f_star = golden_section_int_modified(a, b, par, sol, t, marginal_gain)
+    x_star, f_star = golden_section_int_modified(a, b, marginal_gain, par, sol, t, reassigned_mask, qualification_sorted)
 
-    marginal_gain(x_star, par, sol, t)
+    marginal_gain(x_star, par, sol, t, reassigned_mask, qualification_sorted)
 
     Lh = func_Lh(par, sol, t)
     Ll = func_Ll(par, sol, t)
@@ -233,15 +237,9 @@ def calc_equilibrium(par, sol, t, T, do_print=False):
 
 
 
-def marginal_gain(qualified_idx, par, sol, t):
-
-    reassigned_mask = reassign_func(par, sol, t)
+def marginal_gain(qualified_idx, par, sol, t, reassigned_mask, qualification_sorted):
 
     sol.l_h[reassigned_mask, t] = False # Reset the high-skilled labor status for all individuals
-
-    idx = np.where(reassigned_mask)[0]
-
-    qualification_sorted = idx[np.argsort(sol.theta_h[idx, t])[::-1]]
 
     last_promoted = qualification_sorted[qualified_idx]
 
@@ -327,21 +325,24 @@ def wage_h(par, sol, t, dY_dLl):
     return par.mu*wage_l(par, sol, t, dY_dLl) # Individuals earn a markup of the low-skilled wage based on the parameter mu
 
 def func_Lh(par, sol, t):
-    valid = ~np.isnan(sol.age[:, t])
-    l_hs = sol.l_h[valid, t].astype(bool)
+    # valid = ~np.isnan(sol.age[:, t])
+    # l_hs = sol.l_h[valid, t].astype(bool)
 
-    theta_h_repeated = sol.theta_h[valid, t][l_hs]
-        
+    # theta_h_repeated = sol.theta_h[valid, t][l_hs]
+    # print(sol.theta_h[:, t])
+    # print(sol.l_h[:, t])
 
-    return sum(theta_h_repeated)
+    theta_h_repeated = sol.theta_h[:, t]*sol.l_h[:, t]        
+    return np.nansum(theta_h_repeated)
 
 def func_Ll(par, sol, t):
-    valid = ~np.isnan(sol.age[:, t])
-    l_hs = sol.l_h[valid, t].astype(bool)
+    # valid = ~np.isnan(sol.age[:, t])
+    # l_hs = sol.l_h[valid, t].astype(bool)
 
-    theta_l_repeated = sol.theta_l[valid, t][~l_hs]
+    # theta_l_repeated = sol.theta_l[valid, t][~l_hs]
+    theta_l_repeated = sol.theta_l[:, t]*(1 - sol.l_h[:, t])  
 
-    return sum(theta_l_repeated)
+    return np.nansum(theta_l_repeated)
 
 
 
