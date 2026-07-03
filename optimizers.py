@@ -9,6 +9,8 @@ import numpy as np
 from numba import njit
 from math import copysign, isfinite
 
+from jit_module import jit_if_enabled
+
 # @njit
 def golden(obj,a,b,args=(),tol=1e-6):
     """ golden section search optimizer
@@ -172,8 +174,6 @@ def brentq(f, a, b, args=(), xtol=1e-12, rtol=4.440892098500626e-16, maxiter=100
 
     raise RuntimeError("Maximum iterations exceeded")
 
-
-import numpy as np
 
 def golden_section_int_modified(a, b, f, *args):
     """

@@ -10,6 +10,10 @@ from optimizers import golden, brentq, golden_section_int_modified
 
 from IPython.display import display, Math
 
+from EconModel import EconModelClass, jit
+from numba import njit, prange
+from jit_module import jit_if_enabled
+
 class ModelClass(EconModelClass):
 
     def settings(self):
@@ -141,59 +145,62 @@ class ModelClass(EconModelClass):
 
 
 
+
     def solve(self, do_print=False):
 
         # a. unpack
-        par = self.par
-        sol = self.sol
+        
+        with jit(self) as model:
+            par = model.par
+            sol = model.sol
 
-        t = 0
-        eps = np.inf
+            find_ss(par, sol, do_print=do_print)
 
 
-        while t < (par.T_max - 1) and eps > par.tol:
-    
-            calc_equilibrium(par, sol, t, par.T_max, do_print=do_print)
+def find_ss(par, sol, do_print=False):
 
-            law_of_motions(par, sol, t)
+    t = 0
+    eps = np.inf
 
-            if t == 0:
-                eps = 10e+10
+    while t < (par.T_max - 1) and eps > par.tol:
 
-            else:
-                means_prev = group_means(sol.wage[:, t - 1], sol.age[:, t - 1])
-                means_current = group_means(sol.wage[:, t], sol.age[:, t])
-                eps = np.max(np.abs(means_prev - means_current))
+        calc_equilibrium(par, sol, t, par.T_max, do_print=do_print)
 
-            t += 1
+        law_of_motions(par, sol, t)
 
+        if t == 0:
+            eps = 10e+10
+
+        else:
+            means_prev = group_means(sol.wage[:, t - 1], sol.age[:, t - 1])
+            means_current = group_means(sol.wage[:, t], sol.age[:, t])
+            eps = np.max(np.abs(means_prev - means_current))
+
+        t += 1
+
+
+        if do_print:
+            print("Iteration: ", t, "eps = ", eps)
+
+        if eps < par.tol:
 
             if do_print:
-                print(f"Iteration {t}: eps = {eps:.2e}")
+                print("Convergence achieved at iteration ", t, "with eps = ", eps)
 
-            if eps < par.tol:
+        if t == (par.T_max - 1):
+            
+            if do_print:
+                print("Maximum iterations reached without convergence. Final eps = ", eps)
 
-                if do_print:
-                    print(f"Convergence achieved at iteration {t} with eps = {eps:.2e}")
+        if t == par.T_max - 1 or eps < par.tol:
+            calc_equilibrium(par, sol, t, par.T_max)
 
-            if t == (par.T_max - 1):
-                
-                if do_print:
-                    print(f"Maximum iterations reached without convergence. Final eps = {eps:.2e}")
-
-            if t == par.T_max - 1 or eps < par.tol:
-                calc_equilibrium(par, sol, t, par.T_max)
-
-                sol.age_ss = sol.age[:, t]
-                sol.wage_ss = sol.wage[:, t]
-                sol.l_h_ss = sol.l_h[:, t]
-                sol.ability_ss = sol.ability[:, t]
-                sol.theta_l_ss = sol.theta_l[:, t]
-                sol.theta_h_ss = sol.theta_h[:, t]
-
-
-
-
+            sol.age_ss[:] = sol.age[:, t]
+            sol.wage_ss[:] = sol.wage[:, t]
+            sol.l_h_ss[:] = sol.l_h[:, t]
+            sol.ability_ss[:] = sol.ability[:, t]
+            sol.theta_l_ss[:] = sol.theta_l[:, t]
+            sol.theta_h_ss[:] = sol.theta_h[:, t]
 
 
 def calc_equilibrium(par, sol, t, T, do_print=False):
@@ -235,7 +242,6 @@ def calc_equilibrium(par, sol, t, T, do_print=False):
                               + (1 - sol.l_h[old_cohort_idx, t]) * (~reassigned_mask[old_cohort_idx]*sol.wage[:(population_size - par.N_1), t - 1] + reassigned_mask[old_cohort_idx]*wage_l_target[old_cohort_idx])
 
 
-
 def marginal_gain(qualified_idx, par, sol, t, reassigned_mask, qualification_sorted):
 
     sol.l_h[reassigned_mask, t] = False # Reset the high-skilled labor status for all individuals
@@ -256,7 +262,6 @@ def marginal_gain(qualified_idx, par, sol, t, reassigned_mask, qualification_sor
     diff = (par.A/par.c) * (sol.theta_h[last_promoted, t]*dY_dLh(par, Ll, Lh) - par.mu*sol.theta_l[last_promoted, t]*dY_dLl(par, Ll, Lh)) - K  
 
     return diff
-
 
 def law_of_motions(par, sol, t):
 
@@ -279,70 +284,26 @@ def law_of_motions(par, sol, t):
 
 
 
-    
-    # new_cohort_l_h = np.repeat(False, par.N_1)
-    # old_cohort_l_h = sol.l_h[:, t]
-
-
-    # sol.l_h[]
-    # sol.l_h[:, t + 1] = np.concatenate((new_cohort_l_h, old_cohort_l_h[alive_mask]))
-
-
-
-    # new_cohort_age = np.zeros(par.N_1)
-    # old_cohort_age = sol.age[:, t]
-
-    # alive_mask = np.zeros_like(old_cohort_age, dtype=bool)
-
-    # for age in range(0, par.n):
-    #     idx = np.where(old_cohort_age == age)[0]
-    #     alive_number = int(len(idx) * par.rho[age])
-
-    #     alive_mask[idx[:alive_number]] = True
-    #     alive_mask[idx[alive_number:]] = False
-
-
-    # old_cohort_age = old_cohort_age + 1
-
-    # generation = np.concatenate((new_cohort_age, old_cohort_age[alive_mask]))
-
-    # sol.age[:len(generation), t + 1] = generation
-
-    # new_cohort_l_h = np.repeat(False, par.N_1)
-    # old_cohort_l_h = sol.l_h[:, t]
-    # sol.l_h[:len(generation), t + 1] = np.concatenate((new_cohort_l_h, old_cohort_l_h[alive_mask]))
-
-    # new_cohort_ability = sol.ability_draws[:par.N_1]
-    # sol.ability[:len(generation), t + 1] = np.concatenate((new_cohort_ability, sol.ability[alive_mask, t]))
-
-    # new_cohort_theta_l = par.theta_l[0] + new_cohort_ability
-    # new_cohort_theta_h = par.theta_h[0] + new_cohort_ability
-
-    # old_idx = old_cohort_age[alive_mask].astype(int)
-
-    # old_cohort_theta_l = par.theta_l[old_idx] + sol.ability[alive_mask, t]
-    # old_cohort_theta_h = par.theta_h[old_idx] + sol.ability[alive_mask, t]
-
-    # sol.theta_l[:len(generation), t + 1] = np.concatenate((new_cohort_theta_l, old_cohort_theta_l))
-    # sol.theta_h[:len(generation), t + 1] = np.concatenate((new_cohort_theta_h, old_cohort_theta_h))
-
-
-
 
 def dY_dLl(par, Ll, Lh):
     return par.alpha*(Ll)**(par.alpha-1)*(Lh)**(1-par.alpha)
 
+
 def d2Y_dLl2(par, Ll, Lh):
     return par.alpha*(par.alpha - 1)*(Ll)**(par.alpha - 2)*(Lh)**(1 - par.alpha)
+
 
 def dY_dLh(par, Ll, Lh):
     return (1 - par.alpha)*(Ll)**(par.alpha)*(Lh)**(- par.alpha)
 
+
 def d2Y_dLh2(par, Ll, Lh):
     return (-par.alpha)*(1 - par.alpha)*(Ll)**(par.alpha)*(Lh)**(-par.alpha - 1)
 
+
 def d2Y_dLl_dLh(par, Ll, Lh):
     return par.alpha*(1 - par.alpha)*(Ll)**(par.alpha - 1)*(Lh)**(-par.alpha)
+
 
 def wage_l(par, sol, t, dY_dLl):
     valid = ~np.isnan(sol.age[:, t])
@@ -352,9 +313,11 @@ def wage_l(par, sol, t, dY_dLl):
 def wage_h(par, sol, t, dY_dLl):
     return par.mu*wage_l(par, sol, t, dY_dLl) # Individuals earn a markup of the low-skilled wage based on the parameter mu
 
+
 def func_Lh(par, sol, t):
 
     return np.nansum(sol.theta_h[:, t] * sol.l_h[:, t] * sol.mass[:, t])
+
 
 def func_Ll(par, sol, t):
 
@@ -362,13 +325,12 @@ def func_Ll(par, sol, t):
 
 
 
-def reassign_func(par, sol, t, costum_percentage = None):
+def reassign_func(par, sol, t, costum_percentage = -1.0):
     reassigned_mask = np.zeros_like(sol.age[:, t], dtype=bool)
-
 
     for age in range(par.n):
         idx = np.where(sol.age[:, t] == age)[0]
-        if costum_percentage is not None:
+        if costum_percentage != -1:
             reassigned_number = int(len(idx) * costum_percentage)
         else:
             reassigned_number = int(len(idx) * par.reassigned_percentage)
@@ -392,41 +354,3 @@ def group_means(a, b):
 
 
 
-
-
-
-def params_to_latex(par, filename="params.tex", prefix="par"):
-    """
-    Save all parameters in a namespace/object as LaTeX commands.
-    """
-
-    lines = []
-
-    for key, value in vars(par).items():
-
-        # handle None
-        if value is None:
-            value_str = "None"
-
-        # handle numpy scalars
-        elif isinstance(value, np.generic):
-            value_str = f"{value.item()}"
-
-        # handle floats
-        elif isinstance(value, float):
-            value_str = f"{value:.10g}"
-
-        else:
-            value_str = str(value)
-
-        line = rf"\newcommand{{\{prefix}_{key}}}{{{value_str}}}"
-        lines.append(line)
-
-    latex_code = "\n".join(lines)
-
-    with open(filename, "w") as f:
-        f.write(latex_code)
-
-    print(f"Saved LaTeX commands to: {filename}")
-
-    return latex_code
