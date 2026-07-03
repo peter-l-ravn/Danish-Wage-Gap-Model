@@ -78,11 +78,7 @@ class ModelClass(EconModelClass):
 
         sol.c_bar = np.full((par.T_max), np.nan)
 
-        max_capacity_factor = 1.05
-        max_capacity = par.N_1
-
-        for age in range(par.n):
-            max_capacity += int(par.N_1 * par.rho[age] * max_capacity_factor)
+        max_capacity = int(par.N_1 * par.n)
 
         sol.age = np.full((max_capacity, par.T_max), np.nan)
         sol.wage = np.full((max_capacity, par.T_max), np.nan)
@@ -90,6 +86,7 @@ class ModelClass(EconModelClass):
         sol.ability = np.full((max_capacity, par.T_max), np.nan)
         sol.theta_l = np.full((max_capacity, par.T_max), np.nan)
         sol.theta_h = np.full((max_capacity, par.T_max), np.nan)
+        sol.mass = np.full((max_capacity, par.T_max), np.nan)
 
         sol.age_ss = np.full((max_capacity), np.nan)
         sol.wage_ss = np.full((max_capacity), np.nan)
@@ -97,6 +94,7 @@ class ModelClass(EconModelClass):
         sol.ability_ss = np.full((max_capacity), np.nan)
         sol.theta_l_ss = np.full((max_capacity), np.nan)
         sol.theta_h_ss = np.full((max_capacity), np.nan)
+        sol.mass_ss = np.full((max_capacity), np.nan)
 
     def init_fixed_draws(self):
         par = self.par
@@ -120,12 +118,10 @@ class ModelClass(EconModelClass):
         sol = self.sol
 
         start_idx = 0
+        mass = 1.0
         for age in range(par.n):
-            if age == 0:
-                num_individuals = par.N_1
 
-            else:
-                num_individuals = int(par.rho[age - 1] * num_individuals)
+            num_individuals = par.N_1
                 
             end_idx = start_idx + num_individuals
 
@@ -135,8 +131,11 @@ class ModelClass(EconModelClass):
             sol.ability[start_idx:end_idx, 0] = sol.ability_draws[start_idx:end_idx]
             sol.theta_l[start_idx:end_idx, 0] = par.theta_l[age] + sol.ability[start_idx:end_idx, 0]
             sol.theta_h[start_idx:end_idx, 0] = par.theta_h[age] + sol.ability[start_idx:end_idx, 0]
+            sol.mass[start_idx:end_idx, 0] = mass
 
             start_idx = end_idx
+
+            mass = mass * par.rho[age]
 
         sol.l_h[:end_idx, 0] = reassign_func(par, sol, 0, costum_percentage = 0.02)[:end_idx]
 
@@ -252,7 +251,7 @@ def marginal_gain(qualified_idx, par, sol, t, reassigned_mask, qualification_sor
     Lh = func_Lh(par, sol, t)
     Ll = func_Ll(par, sol, t)
 
-    K = np.nansum(sol.l_h[:, t])
+    K = np.nansum(sol.l_h[:, t] * sol.mass[:, t]) 
 
     diff = (par.A/par.c) * (sol.theta_h[last_promoted, t]*dY_dLh(par, Ll, Lh) - par.mu*sol.theta_l[last_promoted, t]*dY_dLl(par, Ll, Lh)) - K  
 
@@ -261,42 +260,71 @@ def marginal_gain(qualified_idx, par, sol, t, reassigned_mask, qualification_sor
 
 def law_of_motions(par, sol, t):
 
-    new_cohort_age = np.zeros(par.N_1)
-    old_cohort_age = sol.age[:, t]
+    sol.age[:, t + 1] = sol.age[:, t]
 
-    alive_mask = np.zeros_like(old_cohort_age, dtype=bool)
+    sol.l_h[par.N_1:, t + 1] = sol.l_h[:-par.N_1, t] # Old cohort retains their high-skilled labor status
+    sol.l_h[:par.N_1, t + 1] = np.repeat(False, par.N_1)  # New cohort enters as low-skilled labor
 
-    for age in range(0, par.n):
-        idx = np.where(old_cohort_age == age)[0]
-        alive_number = int(len(idx) * par.rho[age])
+    sol.ability[par.N_1:, t + 1] = sol.ability[:-par.N_1, t] # Old cohort retains their ability
+    sol.ability[:par.N_1, t + 1] = sol.ability_draws[:par.N_1]  # New cohort draws new abilities
 
-        alive_mask[idx[:alive_number]] = True
-        alive_mask[idx[alive_number:]] = False
+    sol.theta_l[par.N_1:, t + 1] = par.theta_l[sol.age[par.N_1:, t + 1].astype(int)] + sol.ability[par.N_1:, t + 1] 
+    sol.theta_l[:par.N_1, t + 1] = par.theta_l[0] + sol.ability[:par.N_1, t + 1]  # New cohort uses the first age's theta_l
+
+    sol.theta_h[par.N_1:, t + 1] = par.theta_h[sol.age[par.N_1:, t + 1].astype(int)] + sol.ability[par.N_1:, t + 1]
+    sol.theta_h[:par.N_1, t + 1] = par.theta_h[0] + sol.ability[:par.N_1, t + 1]  # New cohort uses the first age's theta_h
+
+    sol.mass[par.N_1:, t + 1] = sol.mass[:-par.N_1, t] * par.rho[sol.age[par.N_1:, t + 1].astype(int)] # Old cohort's mass adjusted by survival probability
+    sol.mass[:par.N_1, t + 1] = 1.0
 
 
-    old_cohort_age = old_cohort_age + 1
 
-    generation = np.concatenate((new_cohort_age, old_cohort_age[alive_mask]))
+    
+    # new_cohort_l_h = np.repeat(False, par.N_1)
+    # old_cohort_l_h = sol.l_h[:, t]
 
-    sol.age[:len(generation), t + 1] = generation
 
-    new_cohort_l_h = np.repeat(False, par.N_1)
-    old_cohort_l_h = sol.l_h[:, t]
-    sol.l_h[:len(generation), t + 1] = np.concatenate((new_cohort_l_h, old_cohort_l_h[alive_mask]))
+    # sol.l_h[]
+    # sol.l_h[:, t + 1] = np.concatenate((new_cohort_l_h, old_cohort_l_h[alive_mask]))
 
-    new_cohort_ability = sol.ability_draws[:par.N_1]
-    sol.ability[:len(generation), t + 1] = np.concatenate((new_cohort_ability, sol.ability[alive_mask, t]))
 
-    new_cohort_theta_l = par.theta_l[0] + new_cohort_ability
-    new_cohort_theta_h = par.theta_h[0] + new_cohort_ability
 
-    old_idx = old_cohort_age[alive_mask].astype(int)
+    # new_cohort_age = np.zeros(par.N_1)
+    # old_cohort_age = sol.age[:, t]
 
-    old_cohort_theta_l = par.theta_l[old_idx] + sol.ability[alive_mask, t]
-    old_cohort_theta_h = par.theta_h[old_idx] + sol.ability[alive_mask, t]
+    # alive_mask = np.zeros_like(old_cohort_age, dtype=bool)
 
-    sol.theta_l[:len(generation), t + 1] = np.concatenate((new_cohort_theta_l, old_cohort_theta_l))
-    sol.theta_h[:len(generation), t + 1] = np.concatenate((new_cohort_theta_h, old_cohort_theta_h))
+    # for age in range(0, par.n):
+    #     idx = np.where(old_cohort_age == age)[0]
+    #     alive_number = int(len(idx) * par.rho[age])
+
+    #     alive_mask[idx[:alive_number]] = True
+    #     alive_mask[idx[alive_number:]] = False
+
+
+    # old_cohort_age = old_cohort_age + 1
+
+    # generation = np.concatenate((new_cohort_age, old_cohort_age[alive_mask]))
+
+    # sol.age[:len(generation), t + 1] = generation
+
+    # new_cohort_l_h = np.repeat(False, par.N_1)
+    # old_cohort_l_h = sol.l_h[:, t]
+    # sol.l_h[:len(generation), t + 1] = np.concatenate((new_cohort_l_h, old_cohort_l_h[alive_mask]))
+
+    # new_cohort_ability = sol.ability_draws[:par.N_1]
+    # sol.ability[:len(generation), t + 1] = np.concatenate((new_cohort_ability, sol.ability[alive_mask, t]))
+
+    # new_cohort_theta_l = par.theta_l[0] + new_cohort_ability
+    # new_cohort_theta_h = par.theta_h[0] + new_cohort_ability
+
+    # old_idx = old_cohort_age[alive_mask].astype(int)
+
+    # old_cohort_theta_l = par.theta_l[old_idx] + sol.ability[alive_mask, t]
+    # old_cohort_theta_h = par.theta_h[old_idx] + sol.ability[alive_mask, t]
+
+    # sol.theta_l[:len(generation), t + 1] = np.concatenate((new_cohort_theta_l, old_cohort_theta_l))
+    # sol.theta_h[:len(generation), t + 1] = np.concatenate((new_cohort_theta_h, old_cohort_theta_h))
 
 
 
@@ -325,24 +353,12 @@ def wage_h(par, sol, t, dY_dLl):
     return par.mu*wage_l(par, sol, t, dY_dLl) # Individuals earn a markup of the low-skilled wage based on the parameter mu
 
 def func_Lh(par, sol, t):
-    # valid = ~np.isnan(sol.age[:, t])
-    # l_hs = sol.l_h[valid, t].astype(bool)
 
-    # theta_h_repeated = sol.theta_h[valid, t][l_hs]
-    # print(sol.theta_h[:, t])
-    # print(sol.l_h[:, t])
-
-    theta_h_repeated = sol.theta_h[:, t]*sol.l_h[:, t]        
-    return np.nansum(theta_h_repeated)
+    return np.nansum(sol.theta_h[:, t] * sol.l_h[:, t] * sol.mass[:, t])
 
 def func_Ll(par, sol, t):
-    # valid = ~np.isnan(sol.age[:, t])
-    # l_hs = sol.l_h[valid, t].astype(bool)
 
-    # theta_l_repeated = sol.theta_l[valid, t][~l_hs]
-    theta_l_repeated = sol.theta_l[:, t]*(1 - sol.l_h[:, t])  
-
-    return np.nansum(theta_l_repeated)
+    return np.nansum(sol.theta_l[:, t] * (1 - sol.l_h[:, t]) * sol.mass[:, t])
 
 
 
