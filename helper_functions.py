@@ -46,3 +46,7 @@ def params_to_latex(par, filename="params.tex", prefix="par"):
         f.write(latex_code)
 
     # return latex_code
+
+
+
+    

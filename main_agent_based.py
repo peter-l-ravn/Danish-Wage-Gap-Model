@@ -33,12 +33,12 @@ class ModelClass(EconModelClass):
         par.tol = 1e-2 # Convergence tolerance
 
         par.T = 10 # Periods to simulate
-        par.T_max = 100 # Max solver iterations
+        par.T_max = 50 # Max solver iterations
 
         par.N_1 = 10_000 # New entrants per cohort
         par.n = 31 # Number of cohorts
 
-        par.A =  100.0 # Total factor productivity
+        par.A =  200.0 # Total factor productivity
         par.alpha =  0.5 # Output elasticity of low-skilled labor
         par.mu =  1.1 # Wage premium for high-skilled labor
         par.c =  0.5 # Cost of hiring high-skilled labor
@@ -69,7 +69,6 @@ class ModelClass(EconModelClass):
         self.init_fixed_draws()
         
 
-
     def allocate_sol(self):
 
         # unpack
@@ -99,6 +98,7 @@ class ModelClass(EconModelClass):
         sol.theta_l_ss = np.full((max_capacity), np.nan)
         sol.theta_h_ss = np.full((max_capacity), np.nan)
         sol.mass_ss = np.full((max_capacity), np.nan)
+
 
     def init_fixed_draws(self):
         par = self.par
