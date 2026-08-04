@@ -41,10 +41,13 @@ class ModelClass(EconModelClass):
         par.A =  200.0 # Total factor productivity
         par.alpha =  0.5 # Output elasticity of low-skilled labor
         par.mu =  1.1 # Wage premium for high-skilled labor
-        par.c =  0.5 # Cost of hiring high-skilled labor
+        par.c =  0.005 # Cost of hiring high-skilled labor
+
+        # par.theta_l = np.loadtxt('Exogenous_estimation/theta_l.csv', delimiter=',')
+        # par.theta_h =  np.loadtxt('Exogenous_estimation/theta_h.csv', delimiter=',')
 
         par.theta_l = np.loadtxt('Exogenous_estimation/theta_l.csv', delimiter=',')
-        par.theta_h =  np.loadtxt('Exogenous_estimation/theta_h.csv', delimiter=',')
+        par.theta_h =  np.loadtxt('Exogenous_estimation/theta_h.csv', delimiter=',') 
         
         par.theta_mean = -0.0
         par.theta_std = 0.5
@@ -55,7 +58,7 @@ class ModelClass(EconModelClass):
 
         par.tenure_param = 0.1
 
-        par.reassigned_percentage = 0.20 # Percentage of high-skilled labor that can be fired each period
+        par.reassigned_percentage = 0.05 # Percentage of high-skilled labor that can be fired each period
 
 
     def update_params(self):
@@ -229,7 +232,7 @@ def calc_equilibrium(par, sol, t, T, do_print=False):
     Lh = func_Lh(par, sol, t)
     Ll = func_Ll(par, sol, t)
 
-    wage_h_target = wage_h(par, sol, t, dY_dLl(par, Ll, Lh))
+    wage_h_target = wage_h(par, sol, t, dY_dLh(par, Ll, Lh))
     wage_l_target = wage_l(par, sol, t, dY_dLl(par, Ll, Lh))
 
     sol.wage[:par.N_1, t] = (sol.l_h[:par.N_1, t])*wage_h_target[:par.N_1] \
@@ -313,12 +316,15 @@ def d2Y_dLl_dLh(par, Ll, Lh):
 
 @jit_if_enabled()
 def wage_l(par, sol, t, dY_dLl):
-
     return par.A*sol.theta_l[:, t]*dY_dLl
 
 @jit_if_enabled()
-def wage_h(par, sol, t, dY_dLl):
-    return par.mu*wage_l(par, sol, t, dY_dLl) # Individuals earn a markup of the low-skilled wage based on the parameter mu
+def wage_h(par, sol, t, dY_dLh):
+    return par.A*sol.theta_h[:, t]*dY_dLh
+
+# @jit_if_enabled()
+# def wage_h(par, sol, t, dY_dLl):
+#     return par.mu*wage_l(par, sol, t, dY_dLl) # Individuals earn a markup of the low-skilled wage based on the parameter mu
 
 @jit_if_enabled()
 def func_Lh(par, sol, t):
