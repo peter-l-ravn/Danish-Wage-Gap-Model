@@ -35,10 +35,10 @@ class ModelClass(EconModelClass):
         par.T = 10 # Periods to simulate
         par.T_max = 50 # Max solver iterations
 
-        par.N_1 = 10_000 # New entrants per cohort
+        par.N_1 = 20_000 # New entrants per cohort
         par.n = 31 # Number of cohorts
 
-        par.A =  200.0 # Total factor productivity
+        par.A =  400.0 # Total factor productivity
         par.alpha =  0.5 # Output elasticity of low-skilled labor
         par.mu =  1.1 # Wage premium for high-skilled labor
         par.c =  0.005 # Cost of hiring high-skilled labor
