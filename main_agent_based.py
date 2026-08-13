@@ -69,6 +69,7 @@ class ModelClass(EconModelClass):
         """ allocate model """
 
         self.allocate_sol()
+        self.allocate_ss()
         self.init_fixed_draws()
         
 
@@ -93,6 +94,19 @@ class ModelClass(EconModelClass):
         sol.theta_l = np.full((max_capacity, par.T_max), np.nan)
         sol.theta_h = np.full((max_capacity, par.T_max), np.nan)
         sol.mass = np.full((max_capacity, par.T_max), np.nan)
+
+        sol.profits = np.full((par.T_max), np.nan)
+        sol.wage_sum_l = np.full((par.T_max), np.nan)
+        sol.wage_sum_h = np.full((par.T_max), np.nan)
+        sol.K = np.full((par.T_max), np.nan)
+
+    def allocate_ss(self):
+
+        # unpack
+        par = self.par
+        sol = self.sol
+
+        max_capacity = int(par.N_1 * par.n)
 
         sol.age_ss = np.full((max_capacity), np.nan)
         sol.wage_ss = np.full((max_capacity), np.nan)
@@ -146,6 +160,18 @@ class ModelClass(EconModelClass):
 
         sol.l_h[:end_idx, 0] = reassign_func(par, sol, 0, costum_percentage = 0.02)[:end_idx]
 
+    def gen_first_period_from_ss(self):
+        par = self.par
+        sol = self.sol
+
+        sol.age[:, 0] = sol.age_ss[:]
+        sol.wage[:, 0] = sol.wage_ss[:]
+        sol.l_h[:, 0] = sol.l_h_ss[:]
+        sol.ability[:, 0] = sol.ability_ss[:]
+        sol.theta_l[:, 0] = sol.theta_l_ss[:]
+        sol.theta_h[:, 0] = sol.theta_h_ss[:]
+        sol.mass[:, 0] = sol.mass_ss[:]
+
 
 
 
@@ -162,6 +188,27 @@ class ModelClass(EconModelClass):
 
             find_ss(par, sol, do_print=do_print)
 
+
+    def generate_transition(self, t_end, do_print=False):
+
+        self.allocate_sol()
+        self.gen_first_period_from_ss()
+
+        # a. unpack
+
+        with jit(self) as model:
+            
+            par = model.par
+            sol = model.sol
+
+            for t in range(t_end + 1):
+                calc_equilibrium(par, sol, t, do_print=do_print)
+
+                if t < t_end:
+                    law_of_motions(par, sol, t)
+
+
+
 @jit_if_enabled()
 def find_ss(par, sol, do_print=False):
 
@@ -170,7 +217,7 @@ def find_ss(par, sol, do_print=False):
 
     while t < (par.T_max - 1) and eps > par.tol:
 
-        calc_equilibrium(par, sol, t, par.T_max, do_print=do_print)
+        calc_equilibrium(par, sol, t, do_print=do_print)
 
         law_of_motions(par, sol, t)
 
@@ -199,7 +246,7 @@ def find_ss(par, sol, do_print=False):
                 print("Maximum iterations reached without convergence. Final eps = ", eps)
 
         if t == par.T_max - 1 or eps < par.tol:
-            calc_equilibrium(par, sol, t, par.T_max)
+            calc_equilibrium(par, sol, t, do_print=do_print)
 
             sol.age_ss[:] = sol.age[:, t]
             sol.wage_ss[:] = sol.wage[:, t]
@@ -207,10 +254,11 @@ def find_ss(par, sol, do_print=False):
             sol.ability_ss[:] = sol.ability[:, t]
             sol.theta_l_ss[:] = sol.theta_l[:, t]
             sol.theta_h_ss[:] = sol.theta_h[:, t]
+            sol.mass_ss[:] = sol.mass[:, t]
 
 
 @jit_if_enabled()
-def calc_equilibrium(par, sol, t, T, do_print=False):
+def calc_equilibrium(par, sol, t, do_print=False):
 
     population_size = len(sol.age[:, t])
 
@@ -232,7 +280,7 @@ def calc_equilibrium(par, sol, t, T, do_print=False):
     Lh = func_Lh(par, sol, t)
     Ll = func_Ll(par, sol, t)
 
-    wage_h_target = wage_h(par, sol, t, dY_dLh(par, Ll, Lh))
+    wage_h_target = wage_h(par, sol, t, dY_dLl(par, Ll, Lh))
     wage_l_target = wage_l(par, sol, t, dY_dLl(par, Ll, Lh))
 
     sol.wage[:par.N_1, t] = (sol.l_h[:par.N_1, t])*wage_h_target[:par.N_1] \
@@ -248,6 +296,15 @@ def calc_equilibrium(par, sol, t, T, do_print=False):
         sol.wage[old_cohort_idx, t] = sol.l_h[old_cohort_idx, t] * (~reassigned_mask[old_cohort_idx]*sol.wage[:(population_size - par.N_1), t - 1] + reassigned_mask[old_cohort_idx]*wage_h_target[old_cohort_idx]) \
                               + (1 - sol.l_h[old_cohort_idx, t]) * (~reassigned_mask[old_cohort_idx]*sol.wage[:(population_size - par.N_1), t - 1] + reassigned_mask[old_cohort_idx]*wage_l_target[old_cohort_idx])
 
+    sol.profits[t] = par.A*(Ll**par.alpha)*(Lh**(1 - par.alpha)) \
+                    - np.nansum(sol.wage[:, t]*sol.l_h[:, t]*sol.mass[:, t]) \
+                    - np.nansum(sol.wage[:, t]*(1 - sol.l_h[:, t])*sol.mass[:, t]) \
+                    - (par.c/2)*(np.nansum(sol.l_h[:, t]*sol.mass[:, t])**2)
+    
+    sol.Y[t] = par.A*(Ll**par.alpha)*(Lh**(1 - par.alpha))
+    sol.wage_sum_l[t] = np.nansum(sol.wage[:, t]*(1 - sol.l_h[:, t])*sol.mass[:, t])
+    sol.wage_sum_h[t] = np.nansum(sol.wage[:, t]*sol.l_h[:, t]*sol.mass[:, t])
+    sol.K[t] = np.nansum(sol.l_h[:, t]*sol.mass[:, t])
 
 
 @jit_if_enabled()
@@ -289,7 +346,7 @@ def law_of_motions(par, sol, t):
     sol.theta_h[par.N_1:, t + 1] = par.theta_h[sol.age[par.N_1:, t + 1]] + sol.ability[par.N_1:, t + 1]
     sol.theta_h[:par.N_1, t + 1] = par.theta_h[0] + sol.ability[:par.N_1, t + 1]  # New cohort uses the first age's theta_h
 
-    sol.mass[par.N_1:, t + 1] = sol.mass[:-par.N_1, t] * par.rho[sol.age[par.N_1:, t + 1]] # Old cohort's mass adjusted by survival probability
+    sol.mass[par.N_1:, t + 1] = sol.mass[:-par.N_1, t] * par.rho[sol.age[:-par.N_1, t]] # Old cohort's mass adjusted by survival probability
     sol.mass[:par.N_1, t + 1] = 1.0
 
 
@@ -318,13 +375,13 @@ def d2Y_dLl_dLh(par, Ll, Lh):
 def wage_l(par, sol, t, dY_dLl):
     return par.A*sol.theta_l[:, t]*dY_dLl
 
-@jit_if_enabled()
-def wage_h(par, sol, t, dY_dLh):
-    return par.A*sol.theta_h[:, t]*dY_dLh
-
 # @jit_if_enabled()
-# def wage_h(par, sol, t, dY_dLl):
-#     return par.mu*wage_l(par, sol, t, dY_dLl) # Individuals earn a markup of the low-skilled wage based on the parameter mu
+# def wage_h(par, sol, t, dY_dLh):
+#     return par.A*sol.theta_h[:, t]*dY_dLh
+
+@jit_if_enabled()
+def wage_h(par, sol, t, dY_dLl):
+    return par.mu*wage_l(par, sol, t, dY_dLl) # Individuals earn a markup of the low-skilled wage based on the parameter mu
 
 @jit_if_enabled()
 def func_Lh(par, sol, t):
