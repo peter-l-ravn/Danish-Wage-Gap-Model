@@ -92,6 +92,8 @@ class ModelClass(EconModelClass):
 
         sol.age = np.full((max_capacity, par.T_max), -1, dtype=np.int64)
         sol.wage = np.full((max_capacity, par.T_max), np.nan)
+        sol.wage_l = np.full((max_capacity, par.T_max), np.nan)
+        sol.wage_h = np.full((max_capacity, par.T_max), np.nan)
         sol.l_h = np.full((max_capacity, par.T_max), np.nan)
         sol.ability = np.full((max_capacity, par.T_max), np.nan)
         sol.theta_l = np.full((max_capacity, par.T_max), np.nan)
@@ -113,6 +115,8 @@ class ModelClass(EconModelClass):
 
         sol.age_ss = np.full((max_capacity), np.nan)
         sol.wage_ss = np.full((max_capacity), np.nan)
+        sol.wage_l_ss = np.full(max_capacity, np.nan)
+        sol.wage_h_ss = np.full(max_capacity, np.nan)
         sol.l_h_ss = np.full((max_capacity), np.nan)
         sol.ability_ss = np.full((max_capacity), np.nan)
         sol.theta_l_ss = np.full((max_capacity), np.nan)
@@ -152,6 +156,8 @@ class ModelClass(EconModelClass):
 
             sol.age[start_idx:end_idx, 0] = age
             sol.wage[start_idx:end_idx, 0] = 1.0
+            sol.wage_l[start_idx:end_idx, 0] = 1.0
+            sol.wage_h[start_idx:end_idx, 0] = 1.0
 
             sol.ability[start_idx:end_idx, 0] = sol.ability_draws[start_idx:end_idx]
             sol.theta_l[start_idx:end_idx, 0] = par.theta_l[age] + sol.ability[start_idx:end_idx, 0]
@@ -162,7 +168,7 @@ class ModelClass(EconModelClass):
 
             mass = mass * par.rho[age]
 
-        sol.l_h[:end_idx, 0] = reassign_func(par, sol, 0, costum_percentage = 0.02)[:end_idx]
+        sol.l_h[:end_idx, 0] = reassign_func(par, costum_percentage = 0.02)
 
     def gen_first_period_from_ss(self):
         par = self.par
@@ -170,6 +176,8 @@ class ModelClass(EconModelClass):
 
         sol.age[:, 0] = sol.age_ss[:]
         sol.wage[:, 0] = sol.wage_ss[:]
+        sol.wage_l[:, 0] = sol.wage_l_ss
+        sol.wage_h[:, 0] = sol.wage_h_ss
         sol.l_h[:, 0] = sol.l_h_ss[:]
         sol.ability[:, 0] = sol.ability_ss[:]
         sol.theta_l[:, 0] = sol.theta_l_ss[:]
@@ -252,6 +260,8 @@ def find_ss(par, sol, do_print=False):
 
             sol.age_ss[:] = sol.age[:, t]
             sol.wage_ss[:] = sol.wage[:, t]
+            sol.wage_l_ss[:] = sol.wage_l[:, t]
+            sol.wage_h_ss[:] = sol.wage_h[:, t]
             sol.l_h_ss[:] = sol.l_h[:, t]
             sol.ability_ss[:] = sol.ability[:, t]
             sol.theta_l_ss[:] = sol.theta_l[:, t]
@@ -264,53 +274,95 @@ def calc_equilibrium(par, sol, t, do_print=False):
 
     population_size = len(sol.age[:, t])
 
-    reassigned_mask = reassign_func(par, sol, t)
+    reassigned_share = reassign_func(par)
 
-    idx = np.where(reassigned_mask)[0]
+    reassigned_mass = reassigned_share * sol.mass[:, t]
+    retained_mass = (1 - reassigned_share) * sol.mass[:, t]
 
-    qualification_sorted = idx[np.argsort(sol.theta_h[idx, t])[::-1]]
-
-    sol.l_h[reassigned_mask, t] = False # All reassigned indivduals enter the labor market as low-skilled labor
+    qualification_sorted = np.argsort(sol.theta_h[:, t])[::-1]
 
     a = 0
-    b = len(reassigned_mask[reassigned_mask]) - 1
+    b = len(qualification_sorted) - 1
 
-    # x_star, f_star = golden_section_int_modified(a, b, marginal_gain, par, sol, t, reassigned_mask, qualification_sorted)
+    x_star, f_star = golden_section_modified(a, b, marginal_gain, par, sol, t, reassigned_mass, retained_mass, qualification_sorted)
 
-    x_star, f_star = golden_section_modified(a, b, marginal_gain, par, sol, t, reassigned_mask, qualification_sorted)
+    x_star_floor = int(np.floor(x_star))
+    x_star_share = x_star - x_star_floor
+    x_star_ceil = min(x_star_floor + 1, len(qualification_sorted) - 1)
 
-    # x_star = golden(marginal_gain, a, b, args=(par, sol, t, reassigned_mask, qualification_sorted))
+    high_floor, low_floor, Lh_floor, Ll_floor, K_floor = calc_Lh_Ll(
+        par, sol, t, retained_mass, reassigned_mass, qualification_sorted, x_star_floor
+    )
 
-    marginal_gain(x_star, par, sol, t, reassigned_mask, qualification_sorted)
+    high_ceil, low_ceil, Lh_ceil, Ll_ceil, K_ceil = calc_Lh_Ll(
+        par, sol, t, retained_mass, reassigned_mass, qualification_sorted, x_star_ceil
+    )
 
-    Lh = func_Lh(par, sol, t)
-    Ll = func_Ll(par, sol, t)
+    high_mass = (1 - x_star_share) * high_floor + x_star_share * high_ceil
+    low_mass = sol.mass[:, t] - high_mass
+
+    Lh = (1 - x_star_share) * Lh_floor + x_star_share * Lh_ceil
+    Ll = (1 - x_star_share) * Ll_floor + x_star_share * Ll_ceil
+    K = np.nansum(high_mass)
+
+    old_l_h = sol.l_h[:, t].copy()
+
+    sol.l_h[:, t] = high_mass / sol.mass[:, t]
 
     wage_h_target = wage_h(par, sol, t, dY_dLl(par, Ll, Lh))
     wage_l_target = wage_l(par, sol, t, dY_dLl(par, Ll, Lh))
 
-    sol.wage[:par.N_rep, t] = (sol.l_h[:par.N_rep, t])*wage_h_target[:par.N_rep] \
-                          + (1 - sol.l_h[:par.N_rep, t])*wage_l_target[:par.N_rep]
-    
-    old_cohort_idx = slice(par.N_rep, population_size)
+    reassigned_high_mass = high_mass - retained_mass * old_l_h
+    reassigned_low_mass = reassigned_mass - reassigned_high_mass
+
+    new_idx = slice(0, par.N_rep)
 
     if t == 0:
-        sol.wage[old_cohort_idx, t] = sol.l_h[old_cohort_idx, t] * (~reassigned_mask[old_cohort_idx]*sol.wage[:(population_size - par.N_rep), t] + reassigned_mask[old_cohort_idx]*wage_h_target[old_cohort_idx]) \
-                              + (1 - sol.l_h[old_cohort_idx, t]) * (~reassigned_mask[old_cohort_idx]*sol.wage[:(population_size - par.N_rep), t] + reassigned_mask[old_cohort_idx]*wage_l_target[old_cohort_idx])
-
+        previous_wage_h = sol.wage_h[:population_size - par.N_rep, t].copy()
+        previous_wage_l = sol.wage_l[:population_size - par.N_rep, t].copy()
     else:
-        sol.wage[old_cohort_idx, t] = sol.l_h[old_cohort_idx, t] * (~reassigned_mask[old_cohort_idx]*sol.wage[:(population_size - par.N_rep), t - 1] + reassigned_mask[old_cohort_idx]*wage_h_target[old_cohort_idx]) \
-                              + (1 - sol.l_h[old_cohort_idx, t]) * (~reassigned_mask[old_cohort_idx]*sol.wage[:(population_size - par.N_rep), t - 1] + reassigned_mask[old_cohort_idx]*wage_l_target[old_cohort_idx])
+        previous_wage_h = sol.wage_h[:population_size - par.N_rep, t - 1]
+        previous_wage_l = sol.wage_l[:population_size - par.N_rep, t - 1]
 
-    sol.profits[t] = par.A*(Ll**par.alpha)*(Lh**(1 - par.alpha)) \
-                    - np.nansum(sol.wage[:, t]*sol.l_h[:, t]*sol.mass[:, t]) \
-                    - np.nansum(sol.wage[:, t]*(1 - sol.l_h[:, t])*sol.mass[:, t]) \
-                    - (par.c/2)*(np.nansum(sol.l_h[:, t]*sol.mass[:, t])**2)
-    
-    sol.Y[t] = par.A*(Ll**par.alpha)*(Lh**(1 - par.alpha))
-    sol.wage_sum_l[t] = np.nansum(sol.wage[:, t]*(1 - sol.l_h[:, t])*sol.mass[:, t])
-    sol.wage_sum_h[t] = np.nansum(sol.wage[:, t]*sol.l_h[:, t]*sol.mass[:, t])
-    sol.K[t] = np.nansum(sol.l_h[:, t]*sol.mass[:, t])
+
+    sol.wage_h[new_idx, t] = wage_h_target[new_idx]
+    sol.wage_l[new_idx, t] = wage_l_target[new_idx]
+
+    retained_high_mass = retained_mass * old_l_h
+    retained_low_mass = retained_mass * (1.0 - old_l_h)
+
+    old_idx = slice(par.N_rep, population_size)
+
+    high_mass_old = high_mass[old_idx]
+    low_mass_old = low_mass[old_idx]
+
+    high_wage_bill = (retained_high_mass[old_idx] * previous_wage_h + reassigned_high_mass[old_idx] * wage_h_target[old_idx])
+    low_wage_bill = (retained_low_mass[old_idx] * previous_wage_l + reassigned_low_mass[old_idx] * wage_l_target[old_idx])
+
+    # Avoid division by zero.
+    high_denominator = np.where(high_mass_old > 0, high_mass_old, 1.0)
+    low_denominator = np.where(low_mass_old > 0, low_mass_old, 1.0)
+
+    sol.wage_h[old_idx, t] = np.where(high_mass_old > 0, high_wage_bill / high_denominator, wage_h_target[old_idx])
+
+    sol.wage_l[old_idx, t] = np.where(low_mass_old > 0, low_wage_bill / low_denominator, wage_l_target[old_idx])
+
+    sol.wage[:, t] = (sol.l_h[:, t] * sol.wage_h[:, t] + (1.0 - sol.l_h[:, t]) * sol.wage_l[:, t])
+
+
+    sol.wage_sum_h[t] = np.nansum(sol.wage_h[:, t] * high_mass)
+    sol.wage_sum_l[t] = np.nansum(sol.wage_l[:, t] * low_mass)
+
+    sol.Y[t] = par.A * Ll**par.alpha * Lh**(1.0 - par.alpha)
+
+    sol.profits[t] = (
+        sol.Y[t]
+        - sol.wage_sum_h[t]
+        - sol.wage_sum_l[t]
+        - (par.c / 2.0) * K**2
+    )
+
+    sol.K[t] = K
 
 
 
@@ -338,27 +390,32 @@ def calc_equilibrium(par, sol, t, do_print=False):
 
 
 
+def calc_Lh_Ll(par, sol, t, retained_mass, reassigned_mass, qualification_sorted, qualified_idx):
+
+    promoted = qualification_sorted[:qualified_idx + 1]
+
+    high_mass = retained_mass * sol.l_h[:, t]
+    high_mass[promoted] += reassigned_mass[promoted]
+    low_mass = sol.mass[:, t] - high_mass
+
+    Lh = np.nansum(sol.theta_h[:, t] * high_mass)
+    Ll = np.nansum(sol.theta_l[:, t] * low_mass)
+    K = np.nansum(high_mass)
+
+    return high_mass, low_mass, Lh, Ll, K
+
+
 @jit_if_enabled()
-def marginal_gain(qualified_idx, par, sol, t, reassigned_mask, qualification_sorted):
+def marginal_gain(qualified_idx, par, sol, t, reassigned_mass, retained_mass, qualification_sorted):
 
     qualified_idx_floor = int(np.floor(qualified_idx))
     qualified_idx_share = qualified_idx - qualified_idx_floor
 
     def calc_difference(qualified_idx):
-        sol.l_h[reassigned_mask, t] = False # Reset the high-skilled labor status for all individuals
 
         last_promoted = qualification_sorted[qualified_idx]
 
-        promoted = qualification_sorted[:qualified_idx + 1] 
-        not_promoted = qualification_sorted[qualified_idx + 1:]
-
-        sol.l_h[promoted, t] = True # Promote the top qualified_idx individuals to high-skilled labor
-        sol.l_h[not_promoted, t] = False # Demote the rest to low-skilled labor
-
-        Lh = func_Lh(par, sol, t)
-        Ll = func_Ll(par, sol, t)
-
-        K = np.nansum(sol.l_h[:, t] * sol.mass[:, t]) 
+        _, _, Lh, Ll, K = calc_Lh_Ll(par, sol, t, retained_mass, reassigned_mass, qualification_sorted, qualified_idx)
 
         diff = (par.A/par.c) * (sol.theta_h[last_promoted, t]*dY_dLh(par, Ll, Lh) - par.mu*sol.theta_l[last_promoted, t]*dY_dLl(par, Ll, Lh)) - K  
 
@@ -366,8 +423,8 @@ def marginal_gain(qualified_idx, par, sol, t, reassigned_mask, qualification_sor
 
     marginal_floor = calc_difference(qualified_idx_floor)
 
-    if np.sum(reassigned_mask) == qualified_idx_floor + 1:
-        diff = marginal_floor
+    if qualified_idx_floor >= len(qualification_sorted) - 1:
+        return marginal_floor
 
     else:
         marginal_ceil = calc_difference(qualified_idx_floor + 1)
@@ -439,23 +496,33 @@ def func_Ll(par, sol, t):
     return np.nansum(sol.theta_l[:, t] * (1 - sol.l_h[:, t]) * sol.mass[:, t])
 
 
-@jit_if_enabled()
-def reassign_func(par, sol, t, costum_percentage = -1.0):
-    reassigned_mask = np.zeros(sol.age.shape[0], dtype=np.bool_)
+# @jit_if_enabled()
+# def reassign_func(par, sol, t, costum_percentage = -1.0):
+#     reassigned_mask = np.zeros(sol.age.shape[0], dtype=np.bool_)
 
-    for age in range(par.n):
-        idx = np.where(sol.age[:, t] == age)[0]
-        if costum_percentage != -1:
-            reassigned_number = int(len(idx) * costum_percentage)
-        else:
-            reassigned_number = int(len(idx) * par.reassigned_percentage)
+#     for age in range(par.n):
+#         idx = np.where(sol.age[:, t] == age)[0]
+#         if costum_percentage != -1:
+#             reassigned_number = int(len(idx) * costum_percentage)
+#         else:
+#             reassigned_number = int(len(idx) * par.reassigned_percentage)
     
-        chosen = idx[np.argsort(sol.reassign_priority[idx])[:reassigned_number]]
-        reassigned_mask[idx] = False
-        reassigned_mask[chosen] = True
+#         chosen = idx[np.argsort(sol.reassign_priority[idx])[:reassigned_number]]
+#         reassigned_mask[idx] = False
+#         reassigned_mask[chosen] = True
 
-    return reassigned_mask
+#     return reassigned_mask
 
+
+@jit_if_enabled()
+def reassign_func(par, costum_percentage = -1.0):
+    if costum_percentage != -1:
+        reassign_percentage = costum_percentage
+
+    else:
+        reassign_percentage = par.reassigned_percentage
+
+    return reassign_percentage
 
 
 @jit_if_enabled()
