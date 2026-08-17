@@ -1,6 +1,5 @@
-from statistics import NormalDist
-
 import numpy as np
+from statistics import NormalDist
 
 from EconModel import EconModelClass
 
@@ -8,13 +7,35 @@ from consav.grids import nonlinspace
 from consav.linear_interp import interp_1d, interp_1d_vec
 from consav.quadrature import log_normal_gauss_hermite
 
-from optimizers import golden, brentq, golden_section_int_modified, golden_section_modified
+from optimizers import golden, brentq, golden_section_int_modified
 
 from IPython.display import display, Math
 
 from EconModel import EconModelClass, jit
 from numba import njit, prange
 from jit_module import jit_if_enabled
+
+
+def create_weighted_lognormal_distribution(mean, sigma, n_obs, total_mass=1.0):
+    """Approximate a lognormal distribution by equiprobable weighted points."""
+
+    if n_obs < 1:
+        raise ValueError("n_obs must be at least 1")
+
+    if sigma < 0:
+        raise ValueError("sigma must be non-negative")
+
+    weights = np.full(n_obs, total_mass / n_obs)
+
+    if sigma == 0:
+        return np.full(n_obs, np.exp(mean)), weights
+
+    normal_dist = NormalDist(mu=mean, sigma=sigma)
+    probabilities = (np.arange(n_obs) + 0.5) / n_obs
+    abilities = np.exp(np.array([normal_dist.inv_cdf(p) for p in probabilities]))
+
+    return abilities, weights
+
 
 class ModelClass(EconModelClass):
 
@@ -37,8 +58,8 @@ class ModelClass(EconModelClass):
         par.T = 10 # Periods to simulate
         par.T_max = 50 # Max solver iterations
 
-        par.N_rep = 1000 # Number of represenatative agents
-        par.N_1 = 20_000 # Total mass of each cohort
+        par.N_1 = 20_000 # New entrants per cohort
+        par.N_rep = 100 # Representative observations per cohort
         par.n = 31 # Number of cohorts
 
         par.A =  400.0 # Total factor productivity
@@ -177,6 +198,8 @@ class ModelClass(EconModelClass):
         sol.mass[:, 0] = sol.mass_ss[:]
 
 
+
+
     def solve(self, do_print=False):
 
         # a. unpack
@@ -275,13 +298,9 @@ def calc_equilibrium(par, sol, t, do_print=False):
     a = 0
     b = len(reassigned_mask[reassigned_mask]) - 1
 
-    # x_star, f_star = golden_section_int_modified(a, b, marginal_gain, par, sol, t, reassigned_mask, qualification_sorted)
+    x_star, f_star = golden_section_int_modified(a, b, marginal_gain, par, sol, t, reassigned_mask, qualification_sorted)
 
-    x_star, f_star = golden_section_modified(a, b, marginal_gain, par, sol, t, reassigned_mask, qualification_sorted)
-
-    # x_star = golden(marginal_gain, a, b, args=(par, sol, t, reassigned_mask, qualification_sorted))
-
-    marginal_gain(x_star, par, sol, t, reassigned_mask, qualification_sorted)
+    marginal_gain(int(x_star), par, sol, t, reassigned_mask, qualification_sorted)
 
     Lh = func_Lh(par, sol, t)
     Ll = func_Ll(par, sol, t)
@@ -313,66 +332,25 @@ def calc_equilibrium(par, sol, t, do_print=False):
     sol.K[t] = np.nansum(sol.l_h[:, t]*sol.mass[:, t])
 
 
-
-# @jit_if_enabled()
-# def marginal_gain(qualified_idx, par, sol, t, reassigned_mask, qualification_sorted):
-
-#     sol.l_h[reassigned_mask, t] = False # Reset the high-skilled labor status for all individuals
-
-#     last_promoted = qualification_sorted[qualified_idx]
-
-#     promoted = qualification_sorted[:qualified_idx + 1] 
-#     not_promoted = qualification_sorted[qualified_idx + 1:]
-
-#     sol.l_h[promoted, t] = True # Promote the top qualified_idx individuals to high-skilled labor
-#     sol.l_h[not_promoted, t] = False # Demote the rest to low-skilled labor
-
-#     Lh = func_Lh(par, sol, t)
-#     Ll = func_Ll(par, sol, t)
-
-#     K = np.nansum(sol.l_h[:, t] * sol.mass[:, t]) 
-
-#     diff = (par.A/par.c) * (sol.theta_h[last_promoted, t]*dY_dLh(par, Ll, Lh) - par.mu*sol.theta_l[last_promoted, t]*dY_dLl(par, Ll, Lh)) - K  
-
-#     return diff
-
-
-
 @jit_if_enabled()
 def marginal_gain(qualified_idx, par, sol, t, reassigned_mask, qualification_sorted):
 
-    qualified_idx_floor = int(np.floor(qualified_idx))
-    qualified_idx_share = qualified_idx - qualified_idx_floor
+    sol.l_h[reassigned_mask, t] = False # Reset the high-skilled labor status for all individuals
 
-    def calc_difference(qualified_idx):
-        sol.l_h[reassigned_mask, t] = False # Reset the high-skilled labor status for all individuals
+    last_promoted = qualification_sorted[qualified_idx]
 
-        last_promoted = qualification_sorted[qualified_idx]
+    promoted = qualification_sorted[:qualified_idx + 1] 
+    not_promoted = qualification_sorted[qualified_idx + 1:]
 
-        promoted = qualification_sorted[:qualified_idx + 1] 
-        not_promoted = qualification_sorted[qualified_idx + 1:]
+    sol.l_h[promoted, t] = True # Promote the top qualified_idx individuals to high-skilled labor
+    sol.l_h[not_promoted, t] = False # Demote the rest to low-skilled labor
 
-        sol.l_h[promoted, t] = True # Promote the top qualified_idx individuals to high-skilled labor
-        sol.l_h[not_promoted, t] = False # Demote the rest to low-skilled labor
+    Lh = func_Lh(par, sol, t)
+    Ll = func_Ll(par, sol, t)
 
-        Lh = func_Lh(par, sol, t)
-        Ll = func_Ll(par, sol, t)
+    K = np.nansum(sol.l_h[:, t] * sol.mass[:, t]) 
 
-        K = np.nansum(sol.l_h[:, t] * sol.mass[:, t]) 
-
-        diff = (par.A/par.c) * (sol.theta_h[last_promoted, t]*dY_dLh(par, Ll, Lh) - par.mu*sol.theta_l[last_promoted, t]*dY_dLl(par, Ll, Lh)) - K  
-
-        return diff
-
-    marginal_floor = calc_difference(qualified_idx_floor)
-
-    if np.sum(reassigned_mask) == qualified_idx_floor + 1:
-        diff = marginal_floor
-
-    else:
-        marginal_ceil = calc_difference(qualified_idx_floor + 1)
-
-        diff = (1 - qualified_idx_share) * marginal_floor + qualified_idx_share * marginal_ceil
+    diff = (par.A/par.c) * (sol.theta_h[last_promoted, t]*dY_dLh(par, Ll, Lh) - par.mu*sol.theta_l[last_promoted, t]*dY_dLl(par, Ll, Lh)) - K  
 
     return diff
 
@@ -387,14 +365,14 @@ def law_of_motions(par, sol, t):
     sol.ability[par.N_rep:, t + 1] = sol.ability[:-par.N_rep, t] # Old cohort retains their ability
     sol.ability[:par.N_rep, t + 1] = sol.ability_draws[:par.N_rep]  # New cohort draws new abilities
 
-    sol.theta_l[par.N_rep:, t + 1] = par.theta_l[sol.age[par.N_rep:, t + 1]] + sol.ability[par.N_rep:, t + 1] 
+    sol.theta_l[par.N_rep:, t + 1] = par.theta_l[sol.age[par.N_rep:, t + 1]] + sol.ability[par.N_rep:, t + 1]
     sol.theta_l[:par.N_rep, t + 1] = par.theta_l[0] + sol.ability[:par.N_rep, t + 1]  # New cohort uses the first age's theta_l
 
     sol.theta_h[par.N_rep:, t + 1] = par.theta_h[sol.age[par.N_rep:, t + 1]] + sol.ability[par.N_rep:, t + 1]
     sol.theta_h[:par.N_rep, t + 1] = par.theta_h[0] + sol.ability[:par.N_rep, t + 1]  # New cohort uses the first age's theta_h
 
     sol.mass[par.N_rep:, t + 1] = sol.mass[:-par.N_rep, t] * par.rho[sol.age[:-par.N_rep, t]] # Old cohort's mass adjusted by survival probability
-    sol.mass[:par.N_rep, t + 1] = sol.mass_draws[:par.N_rep]  # New cohort's mass is drawn from the lognormal distribution
+    sol.mass[:par.N_rep, t + 1] = sol.mass_draws[:par.N_rep]
 
 
 
@@ -456,8 +434,6 @@ def reassign_func(par, sol, t, costum_percentage = -1.0):
 
     return reassigned_mask
 
-
-
 @jit_if_enabled()
 def group_means(a, b):
     mask = ~np.isnan(a) & ~np.isnan(b)
@@ -471,22 +447,3 @@ def group_means(a, b):
 
 
 
-def create_weighted_lognormal_distribution(mean, sigma, n_obs, total_mass=1.0):
-    """Approximate a lognormal distribution by equiprobable weighted points."""
-
-    if n_obs < 1:
-        raise ValueError("n_obs must be at least 1")
-
-    if sigma < 0:
-        raise ValueError("sigma must be non-negative")
-
-    weights = np.full(n_obs, total_mass / n_obs)
-
-    if sigma == 0:
-        return np.full(n_obs, np.exp(mean)), weights
-
-    normal_dist = NormalDist(mu=mean, sigma=sigma)
-    probabilities = (np.arange(n_obs) + 0.5) / n_obs
-    abilities = np.exp(np.array([normal_dist.inv_cdf(p) for p in probabilities]))
-
-    return abilities, weights

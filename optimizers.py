@@ -277,3 +277,101 @@ def golden_section_int_modified(a, b, f, *args):
         return best_nonpos_x, best_nonpos_f
 
     raise ValueError("No valid points found in the interval.")
+
+
+
+
+
+@jit_if_enabled()
+def golden_section_modified(a, b, f, *args, tol=1e-8, max_iter=1_000):
+    """
+    Continuous golden-section-like search on [a, b].
+
+    Rule:
+    1. Prefer positive values.
+    2. Among positive values, choose the one closest to zero.
+    3. If no positive values exist, choose the non-positive value closest to zero.
+    """
+    if f is None:
+        raise ValueError("Provide a callable f(x, *args).")
+
+    if a > b:
+        a, b = b, a
+
+    phi = (np.sqrt(5) - 1) / 2
+
+    best_pos_x = np.nan
+    best_pos_f = np.inf
+
+    best_nonpos_x = np.nan
+    best_nonpos_f = -np.inf
+
+    def register(x, fx):
+        nonlocal best_pos_x, best_pos_f, best_nonpos_x, best_nonpos_f
+
+        if np.isnan(fx):
+            raise ValueError("f(x, *args) returned NaN.")
+
+        if fx > 0.0 and fx < best_pos_f:
+            best_pos_x = x
+            best_pos_f = fx
+
+        if fx <= 0.0 and fx > best_nonpos_f:
+            best_nonpos_x = x
+            best_nonpos_f = fx
+
+    for _ in range(max_iter):
+
+        if abs(b - a) <= tol:
+            break
+
+        c = a + (1.0 - phi) * (b - a)
+        d = a + phi * (b - a)
+
+        fa = f(a, *args)
+        fb = f(b, *args)
+        fc = f(c, *args)
+        fd = f(d, *args)
+
+        register(a, fa)
+        register(b, fb)
+        register(c, fc)
+        register(d, fd)
+
+        if np.sign(fa) != np.sign(fb):
+            if np.sign(fc) != np.sign(fa):
+                b = c
+            elif np.sign(fd) != np.sign(fb):
+                a = d
+            else:
+                a = c
+                b = d
+
+        else:
+            if fa <= 0.0 and fb <= 0.0:
+                if fa > fb:
+                    b = d
+                else:
+                    a = c
+
+            elif fa > 0.0 and fb > 0.0:
+                if fa < fb:
+                    b = d
+                else:
+                    a = c
+
+            else:
+                a = c
+                b = d
+
+    x_mid = 0.5 * (a + b)
+    f_mid = f(x_mid, *args)
+    register(x_mid, f_mid)
+
+    if not np.isnan(best_pos_x):
+        return best_pos_x, best_pos_f
+
+    if not np.isnan(best_nonpos_x):
+        return best_nonpos_x, best_nonpos_f
+
+    raise ValueError("No valid points found in the interval.")
