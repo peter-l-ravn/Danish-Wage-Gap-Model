@@ -32,6 +32,8 @@ class ModelClass(EconModelClass):
 
         par.seed = 40
 
+        par.wage_market = 'monopsony' # Options: 'competitive', 'monopsony'
+
         par.only_reassigned_are_hired = True # If True, only reassigned individuals are hired as high-skilled labor. If False, all individuals can be hired as high-skilled labor.
 
         par.tol = 1e-6 # Convergence tolerance
@@ -131,8 +133,6 @@ class ModelClass(EconModelClass):
         par = self.par
         sol = self.sol
 
-        rng_reassign = np.random.default_rng(par.seed + 1)
-
         ability_draws, mass_draws = create_weighted_lognormal_distribution(
             par.theta_mean,
             par.theta_std,
@@ -141,8 +141,6 @@ class ModelClass(EconModelClass):
         )
         sol.ability_draws = np.tile(ability_draws, par.n)
         sol.mass_draws = np.tile(mass_draws, par.n)
-
-        sol.reassign_priority = rng_reassign.random(sol.age.shape[0])
 
     def gen_first_period(self):
         
@@ -340,7 +338,10 @@ def calc_equilibrium(par, sol, t, do_print=False):
         reassigned_low_mass = (1.0 - hire_share) * reassigned_mass
 
 
-    wage_h_target = wage_h(par, sol, t, dY_dLl(par, Ll, Lh))
+    if par.wage_market == 'competitive':
+        wage_h_target = wage_h(par, sol, t, dY_dLh(par, Ll, Lh))
+    elif par.wage_market == 'monopsony':
+        wage_h_target = wage_h(par, sol, t, dY_dLl(par, Ll, Lh))
     wage_l_target = wage_l(par, sol, t, dY_dLl(par, Ll, Lh))
 
     new_idx = slice(0, par.N_rep)
@@ -517,8 +518,11 @@ def wage_l(par, sol, t, dY_dLl):
 #     return par.A*sol.theta_h[:, t]*dY_dLh
 
 @jit_if_enabled()
-def wage_h(par, sol, t, dY_dLl):
-    return par.mu*wage_l(par, sol, t, dY_dLl) # Individuals earn a markup of the low-skilled wage based on the parameter mu
+def wage_h(par, sol, t, dY_dX):
+    if par.wage_market == 'competitive':
+        return par.A*sol.theta_h[:, t]*dY_dX
+    elif par.wage_market == 'monopsony':
+        return par.mu*wage_l(par, sol, t, dY_dX) # Individuals earn a markup of the low-skilled wage based on the parameter mu
 
 @jit_if_enabled()
 def func_Lh(par, sol, t):
@@ -527,24 +531,6 @@ def func_Lh(par, sol, t):
 @jit_if_enabled()
 def func_Ll(par, sol, t):
     return np.nansum(sol.theta_l[:, t] * (1 - sol.l_h[:, t]) * sol.mass[:, t])
-
-
-# @jit_if_enabled()
-# def reassign_func(par, sol, t, costum_percentage = -1.0):
-#     reassigned_mask = np.zeros(sol.age.shape[0], dtype=np.bool_)
-
-#     for age in range(par.n):
-#         idx = np.where(sol.age[:, t] == age)[0]
-#         if costum_percentage != -1:
-#             reassigned_number = int(len(idx) * costum_percentage)
-#         else:
-#             reassigned_number = int(len(idx) * par.reassigned_percentage)
-    
-#         chosen = idx[np.argsort(sol.reassign_priority[idx])[:reassigned_number]]
-#         reassigned_mask[idx] = False
-#         reassigned_mask[chosen] = True
-
-#     return reassigned_mask
 
 
 @jit_if_enabled()
