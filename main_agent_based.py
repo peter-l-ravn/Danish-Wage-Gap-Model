@@ -32,10 +32,11 @@ class ModelClass(EconModelClass):
 
         par.seed = 40
 
-        par.tol = 1e-2 # Convergence tolerance
+        par.tol = 1e-6 # Convergence tolerance
+        par.golden_tol = 1e-4
 
         par.T = 10 # Periods to simulate
-        par.T_max = 50 # Max solver iterations
+        par.T_max = 200 # Max solver iterations
 
         par.N_rep = 1000 # Number of represenatative agents
         par.N_1 = 20_000 # Total mass of each cohort
@@ -176,8 +177,8 @@ class ModelClass(EconModelClass):
 
         sol.age[:, 0] = sol.age_ss[:]
         sol.wage[:, 0] = sol.wage_ss[:]
-        sol.wage_l[:, 0] = sol.wage_l_ss
-        sol.wage_h[:, 0] = sol.wage_h_ss
+        sol.wage_l[:, 0] = sol.wage_l_ss[:]
+        sol.wage_h[:, 0] = sol.wage_h_ss[:]
         sol.l_h[:, 0] = sol.l_h_ss[:]
         sol.ability[:, 0] = sol.ability_ss[:]
         sol.theta_l[:, 0] = sol.theta_l_ss[:]
@@ -204,18 +205,13 @@ class ModelClass(EconModelClass):
         self.allocate_sol()
         self.gen_first_period_from_ss()
 
-        # a. unpack
-
         with jit(self) as model:
-            
             par = model.par
             sol = model.sol
 
-            for t in range(t_end + 1):
-                calc_equilibrium(par, sol, t, do_print=do_print)
-
-                if t < t_end:
-                    law_of_motions(par, sol, t)
+            for t in range(t_end):
+                law_of_motions(par, sol, t)
+                calc_equilibrium(par, sol, t + 1, do_print=do_print)
 
 
 
@@ -238,6 +234,7 @@ def find_ss(par, sol, do_print=False):
             means_prev = group_means(sol.wage[:, t - 1], sol.age[:, t - 1])
             means_current = group_means(sol.wage[:, t], sol.age[:, t])
             eps = np.max(np.abs(means_prev - means_current))
+
 
         t += 1
 
@@ -277,14 +274,14 @@ def calc_equilibrium(par, sol, t, do_print=False):
     reassigned_share = reassign_func(par)
 
     reassigned_mass = reassigned_share * sol.mass[:, t]
-    retained_mass = (1 - reassigned_share) * sol.mass[:, t]
+    retained_mass = sol.mass[:, t] - reassigned_mass
 
     qualification_sorted = np.argsort(sol.theta_h[:, t])[::-1]
 
     a = 0
     b = len(qualification_sorted) - 1
 
-    x_star, f_star = golden_section_modified(a, b, marginal_gain, par, sol, t, reassigned_mass, retained_mass, qualification_sorted)
+    x_star, f_star = golden_section_modified(a, b, marginal_gain, par, sol, t, reassigned_mass, retained_mass, qualification_sorted, tol = par.golden_tol)
 
     x_star_floor = int(np.floor(x_star))
     x_star_share = x_star - x_star_floor
@@ -309,13 +306,21 @@ def calc_equilibrium(par, sol, t, do_print=False):
 
     sol.l_h[:, t] = high_mass / sol.mass[:, t]
 
+    retained_high_mass = retained_mass * old_l_h
+    hiring_pool_mass = sol.mass[:, t] - retained_high_mass
+    hired_high_mass = high_mass - retained_high_mass
+    hiring_pool_denominator = np.where(hiring_pool_mass > 0.0, hiring_pool_mass, 1.0)
+    hire_share = np.where(hiring_pool_mass > 0.0, hired_high_mass / hiring_pool_denominator, 0.0)
+
+    retained_low_pool = retained_mass * (1.0 - old_l_h)
+    retained_low_mass = (1.0 - hire_share) * retained_low_pool
+    reassigned_low_mass = (1.0 - hire_share) * reassigned_mass
+
     wage_h_target = wage_h(par, sol, t, dY_dLl(par, Ll, Lh))
     wage_l_target = wage_l(par, sol, t, dY_dLl(par, Ll, Lh))
 
-    reassigned_high_mass = high_mass - retained_mass * old_l_h
-    reassigned_low_mass = reassigned_mass - reassigned_high_mass
-
     new_idx = slice(0, par.N_rep)
+    old_idx = slice(par.N_rep, population_size)
 
     if t == 0:
         previous_wage_h = sol.wage_h[:population_size - par.N_rep, t].copy()
@@ -324,28 +329,18 @@ def calc_equilibrium(par, sol, t, do_print=False):
         previous_wage_h = sol.wage_h[:population_size - par.N_rep, t - 1]
         previous_wage_l = sol.wage_l[:population_size - par.N_rep, t - 1]
 
-
     sol.wage_h[new_idx, t] = wage_h_target[new_idx]
     sol.wage_l[new_idx, t] = wage_l_target[new_idx]
 
-    retained_high_mass = retained_mass * old_l_h
-    retained_low_mass = retained_mass * (1.0 - old_l_h)
+    high_wage_bill = retained_high_mass[old_idx] * previous_wage_h + hired_high_mass[old_idx] * wage_h_target[old_idx]
+    low_wage_bill = retained_low_mass[old_idx] * previous_wage_l + reassigned_low_mass[old_idx] * wage_l_target[old_idx]
 
-    old_idx = slice(par.N_rep, population_size)
+    high_denominator = np.where(high_mass[old_idx] > 0.0, high_mass[old_idx], 1.0)
+    low_denominator = np.where(low_mass[old_idx] > 0.0, low_mass[old_idx], 1.0)
 
-    high_mass_old = high_mass[old_idx]
-    low_mass_old = low_mass[old_idx]
+    sol.wage_h[old_idx, t] = np.where(high_mass[old_idx] > 0.0, high_wage_bill / high_denominator, wage_h_target[old_idx])
+    sol.wage_l[old_idx, t] = np.where(low_mass[old_idx] > 0.0, low_wage_bill / low_denominator, wage_l_target[old_idx])
 
-    high_wage_bill = (retained_high_mass[old_idx] * previous_wage_h + reassigned_high_mass[old_idx] * wage_h_target[old_idx])
-    low_wage_bill = (retained_low_mass[old_idx] * previous_wage_l + reassigned_low_mass[old_idx] * wage_l_target[old_idx])
-
-    # Avoid division by zero.
-    high_denominator = np.where(high_mass_old > 0, high_mass_old, 1.0)
-    low_denominator = np.where(low_mass_old > 0, low_mass_old, 1.0)
-
-    sol.wage_h[old_idx, t] = np.where(high_mass_old > 0, high_wage_bill / high_denominator, wage_h_target[old_idx])
-
-    sol.wage_l[old_idx, t] = np.where(low_mass_old > 0, low_wage_bill / low_denominator, wage_l_target[old_idx])
 
     sol.wage[:, t] = (sol.l_h[:, t] * sol.wage_h[:, t] + (1.0 - sol.l_h[:, t]) * sol.wage_l[:, t])
 
@@ -394,8 +389,13 @@ def calc_Lh_Ll(par, sol, t, retained_mass, reassigned_mass, qualification_sorted
 
     promoted = qualification_sorted[:qualified_idx + 1]
 
-    high_mass = retained_mass * sol.l_h[:, t]
-    high_mass[promoted] += reassigned_mass[promoted]
+    retained_high_mass = retained_mass * sol.l_h[:, t]
+    hiring_pool_mass = sol.mass[:, t] - retained_high_mass
+
+    high_mass = retained_high_mass.copy()
+    high_mass[promoted] += hiring_pool_mass[promoted]
+    high_mass = np.clip(high_mass, 0.0, sol.mass[:, t])
+
     low_mass = sol.mass[:, t] - high_mass
 
     Lh = np.nansum(sol.theta_h[:, t] * high_mass)
@@ -457,7 +457,9 @@ def law_of_motions(par, sol, t):
 
 @jit_if_enabled()
 def dY_dLl(par, Ll, Lh):
-    return par.alpha*(Ll)**(par.alpha-1)*(Lh)**(1-par.alpha)
+    Ll_safe = np.maximum(Ll, 1e-12)
+    Lh_safe = np.maximum(Lh, 1e-12)
+    return par.alpha * Ll_safe**(par.alpha - 1) * Lh_safe**(1 - par.alpha)
 
 @jit_if_enabled()
 def d2Y_dLl2(par, Ll, Lh):
@@ -465,7 +467,9 @@ def d2Y_dLl2(par, Ll, Lh):
 
 @jit_if_enabled()
 def dY_dLh(par, Ll, Lh):
-    return (1 - par.alpha)*(Ll)**(par.alpha)*(Lh)**(- par.alpha)
+    Ll_safe = np.maximum(Ll, 1e-12)
+    Lh_safe = np.maximum(Lh, 1e-12)
+    return (1 - par.alpha) * Ll_safe**par.alpha * Lh_safe**(-par.alpha)
 
 @jit_if_enabled()
 def d2Y_dLh2(par, Ll, Lh):
