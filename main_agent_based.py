@@ -277,11 +277,25 @@ def calc_equilibrium(par, sol, t, do_print=False):
     retained_mass = sol.mass[:, t] - reassigned_mass
 
     qualification_sorted = np.argsort(sol.theta_h[:, t])[::-1]
+    reassigned_mass_by_age = np.sum(reassigned_mass.reshape(par.n, par.N_rep), axis=1)
 
-    a = 0
-    b = len(qualification_sorted) - 1
+    a = 0.0
+    b = float(len(qualification_sorted) - 1)
+    optimizer_args = (par, sol, t, reassigned_mass, retained_mass, qualification_sorted, reassigned_mass_by_age)
 
-    x_star, f_star = golden_section_modified(a, b, marginal_gain, par, sol, t, reassigned_mass, retained_mass, qualification_sorted, tol = par.golden_tol)
+    f_a = marginal_gain(a, *optimizer_args)
+    f_b = marginal_gain(b, *optimizer_args)
+
+    if f_a == 0.0:
+        x_star = a
+    elif f_b == 0.0:
+        x_star = b
+    elif f_a * f_b < 0.0:
+        x_star = brentq(marginal_gain, a, b, args=optimizer_args, xtol=par.golden_tol)
+    elif f_a > 0.0 and f_b > 0.0:
+        x_star = b
+    else:
+        x_star = a
 
     x_star_floor = int(np.floor(x_star))
     x_star_share = x_star - x_star_floor
@@ -306,15 +320,20 @@ def calc_equilibrium(par, sol, t, do_print=False):
 
     sol.l_h[:, t] = high_mass / sol.mass[:, t]
 
-    retained_high_mass = retained_mass * old_l_h
-    hiring_pool_mass = sol.mass[:, t] - retained_high_mass
-    hired_high_mass = high_mass - retained_high_mass
-    hiring_pool_denominator = np.where(hiring_pool_mass > 0.0, hiring_pool_mass, 1.0)
-    hire_share = np.where(hiring_pool_mass > 0.0, hired_high_mass / hiring_pool_denominator, 0.0)
+    # retained_high_mass = retained_mass * old_l_h
+    # hiring_pool_mass = sol.mass[:, t] - retained_high_mass
+    # hired_high_mass = high_mass - retained_high_mass
+    # hiring_pool_denominator = np.where(hiring_pool_mass > 0.0, hiring_pool_mass, 1.0)
+    # hire_share = np.where(hiring_pool_mass > 0.0, hired_high_mass / hiring_pool_denominator, 0.0)
 
-    retained_low_pool = retained_mass * (1.0 - old_l_h)
-    retained_low_mass = (1.0 - hire_share) * retained_low_pool
-    reassigned_low_mass = (1.0 - hire_share) * reassigned_mass
+    # retained_low_pool = retained_mass * (1.0 - old_l_h)
+    # retained_low_mass = (1.0 - hire_share) * retained_low_pool
+    # reassigned_low_mass = (1.0 - hire_share) * reassigned_mass
+
+    retained_high_mass = retained_mass * old_l_h
+    hired_high_mass = high_mass - retained_high_mass
+    retained_low_mass = retained_mass * (1.0 - old_l_h)
+    reassigned_low_mass = reassigned_mass - hired_high_mass
 
     wage_h_target = wage_h(par, sol, t, dY_dLl(par, Ll, Lh))
     wage_l_target = wage_l(par, sol, t, dY_dLl(par, Ll, Lh))
@@ -385,51 +404,71 @@ def calc_equilibrium(par, sol, t, do_print=False):
 
 
 
+@jit_if_enabled()
 def calc_Lh_Ll(par, sol, t, retained_mass, reassigned_mass, qualification_sorted, qualified_idx):
-
     promoted = qualification_sorted[:qualified_idx + 1]
-
-    retained_high_mass = retained_mass * sol.l_h[:, t]
-    hiring_pool_mass = sol.mass[:, t] - retained_high_mass
-
-    high_mass = retained_high_mass.copy()
-    high_mass[promoted] += hiring_pool_mass[promoted]
+    high_mass = retained_mass * sol.l_h[:, t]
+    high_mass[promoted] += reassigned_mass[promoted]
     high_mass = np.clip(high_mass, 0.0, sol.mass[:, t])
+    low_mass = sol.mass[:, t] - high_mass
+    Lh = np.nansum(sol.theta_h[:, t] * high_mass)
+    Ll = np.nansum(sol.theta_l[:, t] * low_mass)
+    K = np.nansum(high_mass)
+    return high_mass, low_mass, Lh, Ll, K
 
+# def calc_Lh_Ll(par, sol, t, retained_mass, reassigned_mass, qualification_sorted, qualified_idx):
+
+#     promoted = qualification_sorted[:qualified_idx + 1]
+
+#     retained_high_mass = retained_mass * sol.l_h[:, t]
+#     hiring_pool_mass = sol.mass[:, t] - retained_high_mass
+
+#     high_mass = retained_high_mass.copy()
+#     high_mass[promoted] += hiring_pool_mass[promoted]
+#     high_mass = np.clip(high_mass, 0.0, sol.mass[:, t])
+
+#     low_mass = sol.mass[:, t] - high_mass
+
+#     Lh = np.nansum(sol.theta_h[:, t] * high_mass)
+#     Ll = np.nansum(sol.theta_l[:, t] * low_mass)
+#     K = np.nansum(high_mass)
+
+#     return high_mass, low_mass, Lh, Ll, K
+
+
+@jit_if_enabled()
+def marginal_gain(qualified_idx, par, sol, t, reassigned_mass, retained_mass, qualification_sorted, reassigned_mass_by_age):
+
+    qualified_idx_floor = int(np.floor(qualified_idx))
+    qualified_idx_share = qualified_idx - qualified_idx_floor
+    qualified_idx_ceil = min(qualified_idx_floor + 1, len(qualification_sorted) - 1)
+
+    high_floor, _, _, _, _ = calc_Lh_Ll(par, sol, t, retained_mass, reassigned_mass, qualification_sorted, qualified_idx_floor)
+    high_ceil, _, _, _, _ = calc_Lh_Ll(par, sol, t, retained_mass, reassigned_mass, qualification_sorted, qualified_idx_ceil)
+
+    high_mass = (1.0 - qualified_idx_share) * high_floor + qualified_idx_share * high_ceil
     low_mass = sol.mass[:, t] - high_mass
 
     Lh = np.nansum(sol.theta_h[:, t] * high_mass)
     Ll = np.nansum(sol.theta_l[:, t] * low_mass)
     K = np.nansum(high_mass)
 
-    return high_mass, low_mass, Lh, Ll, K
+    worker_floor = qualification_sorted[qualified_idx_floor]
+    worker_ceil = qualification_sorted[qualified_idx_ceil]
+    marginal_theta_h = (1.0 - qualified_idx_share) * sol.theta_h[worker_floor, t] + qualified_idx_share * sol.theta_h[worker_ceil, t]
 
+    ability_at_cutoff = marginal_theta_h - par.theta_h[:par.n]
+    ability_safe = np.maximum(ability_at_cutoff, 1e-12)
+    standardized_ability = (np.log(ability_safe) - par.theta_mean) / par.theta_std
+    ability_density = np.exp(-0.5 * standardized_ability**2) / (ability_safe * par.theta_std * np.sqrt(2.0 * np.pi))
+    ability_density = np.where(ability_at_cutoff > 0.0, ability_density, 0.0)
 
-@jit_if_enabled()
-def marginal_gain(qualified_idx, par, sol, t, reassigned_mass, retained_mass, qualification_sorted):
+    marginal_weights = reassigned_mass_by_age * ability_density
+    total_marginal_weight = np.sum(marginal_weights)
+    theta_l_at_cutoff = par.theta_l[:par.n] + ability_at_cutoff
+    marginal_theta_l = np.sum(marginal_weights * theta_l_at_cutoff) / total_marginal_weight
 
-    qualified_idx_floor = int(np.floor(qualified_idx))
-    qualified_idx_share = qualified_idx - qualified_idx_floor
-
-    def calc_difference(qualified_idx):
-
-        last_promoted = qualification_sorted[qualified_idx]
-
-        _, _, Lh, Ll, K = calc_Lh_Ll(par, sol, t, retained_mass, reassigned_mass, qualification_sorted, qualified_idx)
-
-        diff = (par.A/par.c) * (sol.theta_h[last_promoted, t]*dY_dLh(par, Ll, Lh) - par.mu*sol.theta_l[last_promoted, t]*dY_dLl(par, Ll, Lh)) - K  
-
-        return diff
-
-    marginal_floor = calc_difference(qualified_idx_floor)
-
-    if qualified_idx_floor >= len(qualification_sorted) - 1:
-        return marginal_floor
-
-    else:
-        marginal_ceil = calc_difference(qualified_idx_floor + 1)
-
-        diff = (1 - qualified_idx_share) * marginal_floor + qualified_idx_share * marginal_ceil
+    diff = (par.A / par.c) * (marginal_theta_h * dY_dLh(par, Ll, Lh) - par.mu * marginal_theta_l * dY_dLl(par, Ll, Lh)) - K
 
     return diff
 
