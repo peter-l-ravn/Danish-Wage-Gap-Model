@@ -5,51 +5,55 @@ def plot_model_comparison(model_baseline, model_extension):
     plt.style.use("seaborn-v0_8-whitegrid")
 
     def last_period(model):
-        age = model.sol.age[0, :]
-        return age.shape[0] - np.count_nonzero(age) - 1
+        valid_periods = np.where(np.any(np.isfinite(model.sol.mass), axis=0))[0]
+        return valid_periods[-1]
 
-    def weighted_mean(values, mass):
-        valid = ~np.isnan(values) & ~np.isnan(mass)
+    def weighted_mean(values, weights):
+        valid = np.isfinite(values) & np.isfinite(weights) & (weights > 0.0)
         if not np.any(valid):
             return np.nan
-        return np.sum(values[valid] * mass[valid]) / np.sum(mass[valid])
+        return np.sum(values[valid] * weights[valid]) / np.sum(weights[valid])
 
     def mean_by_age(model, variable, t, age_groups, skill=None):
+        total_mass = model.sol.mass[:, t]
+        high_share = np.clip(model.sol.l_h[:, t], 0.0, 1.0)
+
+        if skill == "high":
+            weights = high_share * total_mass
+        elif skill == "low":
+            weights = (1.0 - high_share) * total_mass
+        else:
+            weights = total_mass
+
         means = []
         for age in age_groups:
-            mask = model.sol.age[:, t] == age
-            if skill is not None:
-                mask &= model.sol.l_h[:, t] == skill
-            means.append(weighted_mean(variable[mask, t], model.sol.mass[mask, t]))
+            age_mask = model.sol.age[:, t] == age
+            means.append(weighted_mean(variable[age_mask, t], weights[age_mask]))
+
         return np.array(means)
 
-    def mean_over_time(model, variable):
-        return np.array([
-            weighted_mean(variable[:, t], model.sol.mass[:, t])
-            for t in range(variable.shape[1])
-        ])
+    def mean_over_time(model, variable, t_end):
+        return np.array([weighted_mean(variable[:, t], model.sol.mass[:, t]) for t in range(t_end + 1)])
 
     def high_skill_mass_by_age(model, t, age_groups):
-        high_skill = model.sol.l_h[:, t] == 1
-        mass = np.array([
-            np.nansum(model.sol.mass[high_skill & (model.sol.age[:, t] == age), t])
-            for age in age_groups
-        ])
-        return mass / np.nansum(mass)
+        high_mass = np.clip(model.sol.l_h[:, t], 0.0, 1.0) * model.sol.mass[:, t]
+        mass_by_age = np.array([np.nansum(high_mass[model.sol.age[:, t] == age]) for age in age_groups])
+        total_high_mass = np.nansum(mass_by_age)
+        return mass_by_age / total_high_mass if total_high_mass > 0.0 else np.full(len(age_groups), np.nan)
 
     t_baseline = last_period(model_baseline)
     t_extension = last_period(model_extension)
-    age_groups = range(model_baseline.par.n)
+    age_groups = np.arange(model_baseline.par.n)
 
     # Wage by age
     wage_age_baseline = mean_by_age(model_baseline, model_baseline.sol.wage, t_baseline, age_groups)
     wage_age_extension = mean_by_age(model_extension, model_extension.sol.wage, t_extension, age_groups)
 
     # Wage by age and skill
-    wage_high_baseline = mean_by_age(model_baseline, model_baseline.sol.wage, t_baseline, age_groups, skill=1)
-    wage_high_extension = mean_by_age(model_extension, model_extension.sol.wage, t_extension, age_groups, skill=1)
-    wage_low_baseline = mean_by_age(model_baseline, model_baseline.sol.wage, t_baseline, age_groups, skill=0)
-    wage_low_extension = mean_by_age(model_extension, model_extension.sol.wage, t_extension, age_groups, skill=0)
+    wage_high_baseline = mean_by_age(model_baseline, model_baseline.sol.wage_h, t_baseline, age_groups, skill="high")
+    wage_high_extension = mean_by_age(model_extension, model_extension.sol.wage_h, t_extension, age_groups, skill="high")
+    wage_low_baseline = mean_by_age(model_baseline, model_baseline.sol.wage_l, t_baseline, age_groups, skill="low")
+    wage_low_extension = mean_by_age(model_extension, model_extension.sol.wage_l, t_extension, age_groups, skill="low")
 
     # High-skill allocation
     high_skill_mass_baseline = high_skill_mass_by_age(model_baseline, t_baseline, age_groups)
@@ -58,10 +62,10 @@ def plot_model_comparison(model_baseline, model_extension):
     high_skill_share_extension = mean_by_age(model_extension, model_extension.sol.l_h, t_extension, age_groups)
 
     # Aggregate variables over time
-    mean_wage_baseline = mean_over_time(model_baseline, model_baseline.sol.wage)
-    mean_wage_extension = mean_over_time(model_extension, model_extension.sol.wage)
-    high_skill_share_time_baseline = mean_over_time(model_baseline, model_baseline.sol.l_h)
-    high_skill_share_time_extension = mean_over_time(model_extension, model_extension.sol.l_h)
+    mean_wage_baseline = mean_over_time(model_baseline, model_baseline.sol.wage, t_baseline)
+    mean_wage_extension = mean_over_time(model_extension, model_extension.sol.wage, t_extension)
+    high_skill_share_time_baseline = mean_over_time(model_baseline, model_baseline.sol.l_h, t_baseline)
+    high_skill_share_time_extension = mean_over_time(model_extension, model_extension.sol.l_h, t_extension)
 
     fig, axes = plt.subplots(3, 2, figsize=(14, 12))
     axes = axes.flatten()

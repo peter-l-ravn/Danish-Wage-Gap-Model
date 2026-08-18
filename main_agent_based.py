@@ -32,8 +32,10 @@ class ModelClass(EconModelClass):
 
         par.seed = 40
 
+        par.only_reassigned_are_hired = True # If True, only reassigned individuals are hired as high-skilled labor. If False, all individuals can be hired as high-skilled labor.
+
         par.tol = 1e-6 # Convergence tolerance
-        par.golden_tol = 1e-4
+        par.optimizer_tol = 1e-4
 
         par.T = 10 # Periods to simulate
         par.T_max = 200 # Max solver iterations
@@ -291,7 +293,7 @@ def calc_equilibrium(par, sol, t, do_print=False):
     elif f_b == 0.0:
         x_star = b
     elif f_a * f_b < 0.0:
-        x_star = brentq(marginal_gain, a, b, args=optimizer_args, xtol=par.golden_tol)
+        x_star = brentq(marginal_gain, a, b, args=optimizer_args, xtol=par.optimizer_tol)
     elif f_a > 0.0 and f_b > 0.0:
         x_star = b
     else:
@@ -320,20 +322,23 @@ def calc_equilibrium(par, sol, t, do_print=False):
 
     sol.l_h[:, t] = high_mass / sol.mass[:, t]
 
-    # retained_high_mass = retained_mass * old_l_h
-    # hiring_pool_mass = sol.mass[:, t] - retained_high_mass
-    # hired_high_mass = high_mass - retained_high_mass
-    # hiring_pool_denominator = np.where(hiring_pool_mass > 0.0, hiring_pool_mass, 1.0)
-    # hire_share = np.where(hiring_pool_mass > 0.0, hired_high_mass / hiring_pool_denominator, 0.0)
+    if par.only_reassigned_are_hired:
+        retained_high_mass = retained_mass * old_l_h
+        hired_high_mass = high_mass - retained_high_mass
+        retained_low_mass = retained_mass * (1.0 - old_l_h)
+        reassigned_low_mass = reassigned_mass - hired_high_mass
 
-    # retained_low_pool = retained_mass * (1.0 - old_l_h)
-    # retained_low_mass = (1.0 - hire_share) * retained_low_pool
-    # reassigned_low_mass = (1.0 - hire_share) * reassigned_mass
+    else:
+        retained_high_mass = retained_mass * old_l_h
+        hiring_pool_mass = sol.mass[:, t] - retained_high_mass
+        hired_high_mass = high_mass - retained_high_mass
+        hiring_pool_denominator = np.where(hiring_pool_mass > 0.0, hiring_pool_mass, 1.0)
+        hire_share = np.where(hiring_pool_mass > 0.0, hired_high_mass / hiring_pool_denominator, 0.0)
 
-    retained_high_mass = retained_mass * old_l_h
-    hired_high_mass = high_mass - retained_high_mass
-    retained_low_mass = retained_mass * (1.0 - old_l_h)
-    reassigned_low_mass = reassigned_mass - hired_high_mass
+        retained_low_pool = retained_mass * (1.0 - old_l_h)
+        retained_low_mass = (1.0 - hire_share) * retained_low_pool
+        reassigned_low_mass = (1.0 - hire_share) * reassigned_mass
+
 
     wage_h_target = wage_h(par, sol, t, dY_dLl(par, Ll, Lh))
     wage_l_target = wage_l(par, sol, t, dY_dLl(par, Ll, Lh))
@@ -380,60 +385,43 @@ def calc_equilibrium(par, sol, t, do_print=False):
 
 
 
-# @jit_if_enabled()
-# def marginal_gain(qualified_idx, par, sol, t, reassigned_mask, qualification_sorted):
-
-#     sol.l_h[reassigned_mask, t] = False # Reset the high-skilled labor status for all individuals
-
-#     last_promoted = qualification_sorted[qualified_idx]
-
-#     promoted = qualification_sorted[:qualified_idx + 1] 
-#     not_promoted = qualification_sorted[qualified_idx + 1:]
-
-#     sol.l_h[promoted, t] = True # Promote the top qualified_idx individuals to high-skilled labor
-#     sol.l_h[not_promoted, t] = False # Demote the rest to low-skilled labor
-
-#     Lh = func_Lh(par, sol, t)
-#     Ll = func_Ll(par, sol, t)
-
-#     K = np.nansum(sol.l_h[:, t] * sol.mass[:, t]) 
-
-#     diff = (par.A/par.c) * (sol.theta_h[last_promoted, t]*dY_dLh(par, Ll, Lh) - par.mu*sol.theta_l[last_promoted, t]*dY_dLl(par, Ll, Lh)) - K  
-
-#     return diff
-
-
 
 @jit_if_enabled()
 def calc_Lh_Ll(par, sol, t, retained_mass, reassigned_mass, qualification_sorted, qualified_idx):
-    promoted = qualification_sorted[:qualified_idx + 1]
-    high_mass = retained_mass * sol.l_h[:, t]
-    high_mass[promoted] += reassigned_mass[promoted]
-    high_mass = np.clip(high_mass, 0.0, sol.mass[:, t])
-    low_mass = sol.mass[:, t] - high_mass
-    Lh = np.nansum(sol.theta_h[:, t] * high_mass)
-    Ll = np.nansum(sol.theta_l[:, t] * low_mass)
-    K = np.nansum(high_mass)
-    return high_mass, low_mass, Lh, Ll, K
 
-# def calc_Lh_Ll(par, sol, t, retained_mass, reassigned_mass, qualification_sorted, qualified_idx):
+    if par.only_reassigned_are_hired:
+        promoted = qualification_sorted[:qualified_idx + 1]
 
-#     promoted = qualification_sorted[:qualified_idx + 1]
+        high_mass = retained_mass * sol.l_h[:, t]
+        high_mass[promoted] += reassigned_mass[promoted]
+        high_mass = np.clip(high_mass, 0.0, sol.mass[:, t])
 
-#     retained_high_mass = retained_mass * sol.l_h[:, t]
-#     hiring_pool_mass = sol.mass[:, t] - retained_high_mass
+        low_mass = sol.mass[:, t] - high_mass
 
-#     high_mass = retained_high_mass.copy()
-#     high_mass[promoted] += hiring_pool_mass[promoted]
-#     high_mass = np.clip(high_mass, 0.0, sol.mass[:, t])
+        Lh = np.nansum(sol.theta_h[:, t] * high_mass)
+        Ll = np.nansum(sol.theta_l[:, t] * low_mass)
 
-#     low_mass = sol.mass[:, t] - high_mass
+        K = np.nansum(high_mass)
 
-#     Lh = np.nansum(sol.theta_h[:, t] * high_mass)
-#     Ll = np.nansum(sol.theta_l[:, t] * low_mass)
-#     K = np.nansum(high_mass)
+        return high_mass, low_mass, Lh, Ll, K
 
-#     return high_mass, low_mass, Lh, Ll, K
+    else:
+        promoted = qualification_sorted[:qualified_idx + 1]
+
+        retained_high_mass = retained_mass * sol.l_h[:, t]
+        hiring_pool_mass = sol.mass[:, t] - retained_high_mass
+
+        high_mass = retained_high_mass.copy()
+        high_mass[promoted] += hiring_pool_mass[promoted]
+        high_mass = np.clip(high_mass, 0.0, sol.mass[:, t])
+
+        low_mass = sol.mass[:, t] - high_mass
+
+        Lh = np.nansum(sol.theta_h[:, t] * high_mass)
+        Ll = np.nansum(sol.theta_l[:, t] * low_mass)
+        K = np.nansum(high_mass)
+
+        return high_mass, low_mass, Lh, Ll, K
 
 
 @jit_if_enabled()
@@ -457,6 +445,8 @@ def marginal_gain(qualified_idx, par, sol, t, reassigned_mass, retained_mass, qu
     worker_ceil = qualification_sorted[qualified_idx_ceil]
     marginal_theta_h = (1.0 - qualified_idx_share) * sol.theta_h[worker_floor, t] + qualified_idx_share * sol.theta_h[worker_ceil, t]
 
+    # The problem is that theta_l is arbritary given a specific age-cutoff, hence we need to estimate the marginal theta_l 
+    # at all ages around the cutoff
     ability_at_cutoff = marginal_theta_h - par.theta_h[:par.n]
     ability_safe = np.maximum(ability_at_cutoff, 1e-12)
     standardized_ability = (np.log(ability_safe) - par.theta_mean) / par.theta_std
