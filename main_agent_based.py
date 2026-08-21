@@ -42,7 +42,22 @@ class ModelClass(EconModelClass):
 
         par.N_rep = 1000 # Number of represenatative agents
         par.N_1 = 20_000 # Total mass of each cohort
-        par.n = 31 # Number of cohorts
+        # par.n = 31 # Number of cohorts
+
+        rho_data = np.loadtxt('Exogenous_estimation/rho.csv', delimiter=',')
+        par.age_grid = rho_data[:, 0].astype(int)
+        par.rho = rho_data[:, 1]
+
+        par.min_age = int(np.min(par.age_grid))
+        par.max_age = int(np.max(par.age_grid))
+        par.n = len(par.age_grid) # Number of cohorts
+
+        expected_age_grid = np.arange(par.min_age, par.max_age + 1)
+
+        if not np.array_equal(par.age_grid, expected_age_grid):
+            raise ValueError("rho.csv must contain consecutive ages")
+        if np.any(par.rho < 0) or np.any(par.rho > 1):
+            raise ValueError("rho.csv must contain survival probabilities between 0 and 1")
 
         par.A =  400.0 # Total factor productivity
         par.alpha =  0.5 # Output elasticity of low-skilled labor
@@ -211,9 +226,15 @@ class ModelClass(EconModelClass):
             par = model.par
             sol = model.sol
 
-            for t in range(t_end):
-                law_of_motions(par, sol, t)
-                calc_equilibrium(par, sol, t + 1, do_print=do_print)
+            for t in range(t_end + 1):
+                if t > 0:
+                    apply_retirement(par, sol, t)
+                    calc_equilibrium(par, sol, t, do_print=do_print)
+
+                if t < t_end:
+                    law_of_motions(par, sol, t)
+
+
 
 
 
@@ -225,6 +246,7 @@ def find_ss(par, sol, do_print=False):
 
     while t < (par.T_max - 1) and eps > par.tol:
 
+        apply_retirement(par, sol, t)
         calc_equilibrium(par, sol, t, do_print=do_print)
 
         law_of_motions(par, sol, t)
@@ -255,6 +277,7 @@ def find_ss(par, sol, do_print=False):
                 print("Maximum iterations reached without convergence. Final eps = ", eps)
 
         if t == par.T_max - 1 or eps < par.tol:
+            apply_retirement(par, sol, t)
             calc_equilibrium(par, sol, t, do_print=do_print)
 
             sol.age_ss[:] = sol.age[:, t]
@@ -320,7 +343,8 @@ def calc_equilibrium(par, sol, t, do_print=False):
 
     old_l_h = sol.l_h[:, t].copy()
 
-    sol.l_h[:, t] = high_mass / sol.mass[:, t]
+    mass_denominator = np.where(sol.mass[:, t] > 0.0, sol.mass[:, t], 1.0)
+    sol.l_h[:, t] = np.where(sol.mass[:, t] > 0.0, high_mass / mass_denominator, 0.0)
 
     if par.only_reassigned_are_hired:
         retained_high_mass = retained_mass * old_l_h
@@ -462,6 +486,13 @@ def marginal_gain(qualified_idx, par, sol, t, reassigned_mass, retained_mass, qu
 
     return diff
 
+
+@jit_if_enabled()
+def apply_retirement(par, sol, t):
+    survival_rate = par.rho[sol.age[:, t]]
+    sol.mass[:, t] = sol.mass[:, t] * survival_rate
+
+
 @jit_if_enabled()
 def law_of_motions(par, sol, t):
 
@@ -479,7 +510,7 @@ def law_of_motions(par, sol, t):
     sol.theta_h[par.N_rep:, t + 1] = par.theta_h[sol.age[par.N_rep:, t + 1]] + sol.ability[par.N_rep:, t + 1]
     sol.theta_h[:par.N_rep, t + 1] = par.theta_h[0] + sol.ability[:par.N_rep, t + 1]  # New cohort uses the first age's theta_h
 
-    sol.mass[par.N_rep:, t + 1] = sol.mass[:-par.N_rep, t] * par.rho[sol.age[:-par.N_rep, t]] # Old cohort's mass adjusted by survival probability
+    sol.mass[par.N_rep:, t + 1] = sol.mass[:-par.N_rep, t] # Old cohort's mass adjusted by survival probability
     sol.mass[:par.N_rep, t + 1] = sol.mass_draws[:par.N_rep]  # New cohort's mass is drawn from the lognormal distribution
 
 
