@@ -46,20 +46,22 @@ class ModelClass(EconModelClass):
         par.N_1 = 20_000 # Total mass of each cohort
         # par.n = 31 # Number of cohorts
 
-        rho_data = np.loadtxt('Exogenous_estimation/rho.csv', delimiter=',')
-        par.age_grid = rho_data[:, 0].astype(int)
-        par.rho = rho_data[:, 1]
+        # rho_data = np.loadtxt('Exogenous_estimation/rho.csv', delimiter=',')
+        # par.age_grid = rho_data[:, 0].astype(int)
+        # par.rho = rho_data[:, 1]
 
-        par.min_age = int(np.min(par.age_grid))
-        par.max_age = int(np.max(par.age_grid))
-        par.n = len(par.age_grid) # Number of cohorts
+        # par.min_age = int(np.min(par.age_grid))
+        # par.max_age = int(np.max(par.age_grid))
+        # par.n = len(par.age_grid) # Number of cohorts
 
-        expected_age_grid = np.arange(par.min_age, par.max_age + 1)
+        # expected_age_grid = np.arange(par.min_age, par.max_age + 1)
 
-        if not np.array_equal(par.age_grid, expected_age_grid):
-            raise ValueError("rho.csv must contain consecutive ages")
-        if np.any(par.rho < 0) or np.any(par.rho > 1):
-            raise ValueError("rho.csv must contain survival probabilities between 0 and 1")
+        # if not np.array_equal(par.age_grid, expected_age_grid):
+        #     raise ValueError("rho.csv must contain consecutive ages")
+        # if np.any(par.rho < 0) or np.any(par.rho > 1):
+        #     raise ValueError("rho.csv must contain survival probabilities between 0 and 1")
+
+        par.n = 31 # Number of cohorts
 
         par.A =  400.0 # Total factor productivity
         par.alpha =  0.5 # Output elasticity of low-skilled labor
