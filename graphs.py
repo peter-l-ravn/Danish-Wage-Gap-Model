@@ -5,7 +5,7 @@ def plot_model_comparison(model_baseline, model_extension):
     plt.style.use("seaborn-v0_8-whitegrid")
 
     def last_period(model):
-        valid_periods = np.where(np.any(np.isfinite(model.sol.mass), axis=0))[0]
+        valid_periods = np.where(np.any(np.isfinite(model.sol.mass), axis=(1, 2)))[0]
         return valid_periods[-1]
 
     def weighted_mean(values, weights):
@@ -15,8 +15,8 @@ def plot_model_comparison(model_baseline, model_extension):
         return np.sum(values[valid] * weights[valid]) / np.sum(weights[valid])
 
     def mean_by_age(model, variable, t, age_groups, skill=None):
-        total_mass = model.sol.mass[:, t]
-        high_share = np.clip(model.sol.l_h[:, t], 0.0, 1.0)
+        total_mass = model.sol.mass[t]
+        high_share = np.clip(model.sol.l_h[t], 0.0, 1.0)
 
         if skill == "high":
             weights = high_share * total_mass
@@ -27,17 +27,16 @@ def plot_model_comparison(model_baseline, model_extension):
 
         means = []
         for age in age_groups:
-            age_mask = model.sol.age[:, t] == age
-            means.append(weighted_mean(variable[age_mask, t], weights[age_mask]))
+            means.append(weighted_mean(variable[t, age], weights[age]))
 
         return np.array(means)
 
     def mean_over_time(model, variable, t_end):
-        return np.array([weighted_mean(variable[:, t], model.sol.mass[:, t]) for t in range(t_end + 1)])
+        return np.array([weighted_mean(variable[t], model.sol.mass[t]) for t in range(t_end + 1)])
 
     def high_skill_mass_by_age(model, t, age_groups):
-        high_mass = np.clip(model.sol.l_h[:, t], 0.0, 1.0) * model.sol.mass[:, t]
-        mass_by_age = np.array([np.nansum(high_mass[model.sol.age[:, t] == age]) for age in age_groups])
+        high_mass = np.clip(model.sol.l_h[t], 0.0, 1.0) * model.sol.mass[t]
+        mass_by_age = np.nansum(high_mass, axis=1)
         total_high_mass = np.nansum(mass_by_age)
         return mass_by_age / total_high_mass if total_high_mass > 0.0 else np.full(len(age_groups), np.nan)
 
@@ -106,7 +105,7 @@ def plot_model(model_baseline):
     plt.style.use("seaborn-v0_8-whitegrid")
 
     def last_period(model):
-        valid_periods = np.where(np.any(np.isfinite(model.sol.mass), axis=0))[0]
+        valid_periods = np.where(np.any(np.isfinite(model.sol.mass), axis=(1, 2)))[0]
         return valid_periods[-1]
 
     def weighted_mean(values, weights):
@@ -116,8 +115,8 @@ def plot_model(model_baseline):
         return np.sum(values[valid] * weights[valid]) / np.sum(weights[valid])
 
     def mean_by_age(model, variable, t, age_groups, skill=None):
-        total_mass = model.sol.mass[:, t]
-        high_share = np.clip(model.sol.l_h[:, t], 0.0, 1.0)
+        total_mass = model.sol.mass[t]
+        high_share = np.clip(model.sol.l_h[t], 0.0, 1.0)
 
         if skill == "high":
             weights = high_share * total_mass
@@ -128,17 +127,16 @@ def plot_model(model_baseline):
 
         means = []
         for age in age_groups:
-            age_mask = model.sol.age[:, t] == age
-            means.append(weighted_mean(variable[age_mask, t], weights[age_mask]))
+            means.append(weighted_mean(variable[t, age], weights[age]))
 
         return np.array(means)
 
     def mean_over_time(model, variable, t_end):
-        return np.array([weighted_mean(variable[:, t], model.sol.mass[:, t]) for t in range(t_end + 1)])
+        return np.array([weighted_mean(variable[t], model.sol.mass[t]) for t in range(t_end + 1)])
 
     def high_skill_mass_by_age(model, t, age_groups):
-        high_mass = np.clip(model.sol.l_h[:, t], 0.0, 1.0) * model.sol.mass[:, t]
-        mass_by_age = np.array([np.nansum(high_mass[model.sol.age[:, t] == age]) for age in age_groups])
+        high_mass = np.clip(model.sol.l_h[t], 0.0, 1.0) * model.sol.mass[t]
+        mass_by_age = np.nansum(high_mass, axis=1)
         total_high_mass = np.nansum(mass_by_age)
         return mass_by_age / total_high_mass if total_high_mass > 0.0 else np.full(len(age_groups), np.nan)
 
@@ -191,15 +189,15 @@ def plot_wage_gap(model, young_max, old_min, x_size=8, y_size=5):
             return np.nan
         return np.sum(values[valid] * weights[valid]) / np.sum(weights[valid])
 
-    valid_periods = np.where(np.any(np.isfinite(model.sol.mass), axis=0))[0]
+    valid_periods = np.where(np.any(np.isfinite(model.sol.mass), axis=(1, 2)))[0]
     T = valid_periods[-1] + 1
     wage_gap = np.full(T, np.nan)
 
     for t in range(T):
-        young = model.sol.age[:, t] <= young_max
-        old = model.sol.age[:, t] >= old_min
-        young_wage = weighted_mean(model.sol.wage[young, t], model.sol.mass[young, t])
-        old_wage = weighted_mean(model.sol.wage[old, t], model.sol.mass[old, t])
+        young = model.sol.age[t] <= young_max
+        old = model.sol.age[t] >= old_min
+        young_wage = weighted_mean(model.sol.wage[t][young], model.sol.mass[t][young])
+        old_wage = weighted_mean(model.sol.wage[t][old], model.sol.mass[t][old])
         wage_gap[t] = old_wage - young_wage
 
     plt.figure(figsize=(x_size, y_size))
@@ -220,14 +218,14 @@ def plot_mean_age_high_skill(model, x_size=8, y_size=5):
             return np.nan
         return np.sum(values[valid] * weights[valid]) / np.sum(weights[valid])
 
-    valid_periods = np.where(np.any(np.isfinite(model.sol.mass), axis=0))[0]
+    valid_periods = np.where(np.any(np.isfinite(model.sol.mass), axis=(1, 2)))[0]
     T = valid_periods[-1] + 1
     mean_age = np.full(T, np.nan)
 
     for t in range(T):
-        high_skill_share = np.clip(model.sol.l_h[:, t], 0.0, 1.0)
-        high_skill_mass = high_skill_share * model.sol.mass[:, t]
-        mean_age[t] = weighted_mean(model.sol.age[:, t], high_skill_mass)
+        high_skill_share = np.clip(model.sol.l_h[t], 0.0, 1.0)
+        high_skill_mass = high_skill_share * model.sol.mass[t]
+        mean_age[t] = weighted_mean(model.sol.age[t], high_skill_mass)
 
     plt.figure(figsize=(x_size, y_size))
     plt.plot(np.arange(T), mean_age, linewidth=2)
