@@ -134,7 +134,6 @@ class ModelClass(EconModelClass):
 
         shape = (par.n, par.N_rep)
 
-        sol.age_ss = np.full(shape, -1, dtype=np.int64)
         sol.wage_ss = np.full(shape, np.nan)
         sol.wage_l_ss = np.full(shape, np.nan)
         sol.wage_h_ss = np.full(shape, np.nan)

@@ -192,12 +192,13 @@ def plot_wage_gap(model, young_max, old_min, x_size=8, y_size=5):
     valid_periods = np.where(np.any(np.isfinite(model.sol.mass), axis=(1, 2)))[0]
     T = valid_periods[-1] + 1
     wage_gap = np.full(T, np.nan)
+    age_grid = np.arange(model.par.n)
+    young = age_grid <= young_max
+    old = age_grid >= old_min
 
     for t in range(T):
-        young = model.sol.age[t] <= young_max
-        old = model.sol.age[t] >= old_min
-        young_wage = weighted_mean(model.sol.wage[t][young], model.sol.mass[t][young])
-        old_wage = weighted_mean(model.sol.wage[t][old], model.sol.mass[t][old])
+        young_wage = weighted_mean(model.sol.wage[t, young], model.sol.mass[t, young])
+        old_wage = weighted_mean(model.sol.wage[t, old], model.sol.mass[t, old])
         wage_gap[t] = old_wage - young_wage
 
     plt.figure(figsize=(x_size, y_size))
@@ -221,11 +222,13 @@ def plot_mean_age_high_skill(model, x_size=8, y_size=5):
     valid_periods = np.where(np.any(np.isfinite(model.sol.mass), axis=(1, 2)))[0]
     T = valid_periods[-1] + 1
     mean_age = np.full(T, np.nan)
+    age_grid = np.arange(model.par.n)
 
     for t in range(T):
         high_skill_share = np.clip(model.sol.l_h[t], 0.0, 1.0)
         high_skill_mass = high_skill_share * model.sol.mass[t]
-        mean_age[t] = weighted_mean(model.sol.age[t], high_skill_mass)
+        high_skill_mass_by_age = np.nansum(high_skill_mass, axis=1)
+        mean_age[t] = weighted_mean(age_grid, high_skill_mass_by_age)
 
     plt.figure(figsize=(x_size, y_size))
     plt.plot(np.arange(T), mean_age, linewidth=2)
