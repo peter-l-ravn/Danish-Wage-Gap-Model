@@ -110,17 +110,16 @@ class ModelClass(EconModelClass):
 
         sol.c_bar = np.full((par.T_max), np.nan)
 
-        max_capacity = int(par.N_rep * par.n)
+        shape = (par.T_max, par.n, par.N_rep)
 
-        sol.age = np.full((max_capacity, par.T_max), -1, dtype=np.int64)
-        sol.wage = np.full((max_capacity, par.T_max), np.nan)
-        sol.wage_l = np.full((max_capacity, par.T_max), np.nan)
-        sol.wage_h = np.full((max_capacity, par.T_max), np.nan)
-        sol.l_h = np.full((max_capacity, par.T_max), np.nan)
-        sol.ability = np.full((max_capacity, par.T_max), np.nan)
-        sol.theta_l = np.full((max_capacity, par.T_max), np.nan)
-        sol.theta_h = np.full((max_capacity, par.T_max), np.nan)
-        sol.mass = np.full((max_capacity, par.T_max), np.nan)
+        sol.wage = np.full(shape, np.nan)
+        sol.wage_l = np.full(shape, np.nan)
+        sol.wage_h = np.full(shape, np.nan)
+        sol.l_h = np.full(shape, np.nan)
+        sol.ability = np.full(shape, np.nan)
+        sol.theta_l = np.full(shape, np.nan)
+        sol.theta_h = np.full(shape, np.nan)
+        sol.mass = np.full(shape, np.nan)
 
         sol.profits = np.full((par.T_max), np.nan)
         sol.wage_sum_l = np.full((par.T_max), np.nan)
@@ -133,17 +132,16 @@ class ModelClass(EconModelClass):
         par = self.par
         sol = self.sol
 
-        max_capacity = int(par.N_rep * par.n)
+        shape = (par.n, par.N_rep)
 
-        sol.age_ss = np.full((max_capacity), np.nan)
-        sol.wage_ss = np.full((max_capacity), np.nan)
-        sol.wage_l_ss = np.full(max_capacity, np.nan)
-        sol.wage_h_ss = np.full(max_capacity, np.nan)
-        sol.l_h_ss = np.full((max_capacity), np.nan)
-        sol.ability_ss = np.full((max_capacity), np.nan)
-        sol.theta_l_ss = np.full((max_capacity), np.nan)
-        sol.theta_h_ss = np.full((max_capacity), np.nan)
-        sol.mass_ss = np.full((max_capacity), np.nan)
+        sol.wage_ss = np.full(shape, np.nan)
+        sol.wage_l_ss = np.full(shape, np.nan)
+        sol.wage_h_ss = np.full(shape, np.nan)
+        sol.l_h_ss = np.full(shape, np.nan)
+        sol.ability_ss = np.full(shape, np.nan)
+        sol.theta_l_ss = np.full(shape, np.nan)
+        sol.theta_h_ss = np.full(shape, np.nan)
+        sol.mass_ss = np.full(shape, np.nan)
 
 
     def init_fixed_draws(self):
@@ -156,51 +154,42 @@ class ModelClass(EconModelClass):
             par.N_rep,
             total_mass=par.N_1,
         )
-        sol.ability_draws = np.tile(ability_draws, par.n)
-        sol.mass_draws = np.tile(mass_draws, par.n)
+        sol.ability_draws = np.tile(ability_draws, (par.n, 1))
+        sol.mass_draws = np.tile(mass_draws, (par.n, 1))
 
     def gen_first_period(self):
         
         par = self.par
         sol = self.sol
 
-        start_idx = 0
         mass = 1.0
         for age in range(par.n):
 
-            num_individuals = par.N_rep
-                
-            end_idx = start_idx + num_individuals
+            sol.wage[0, age, :] = 1.0
+            sol.wage_l[0, age, :] = 1.0
+            sol.wage_h[0, age, :] = 1.0
 
-            sol.age[start_idx:end_idx, 0] = age
-            sol.wage[start_idx:end_idx, 0] = 1.0
-            sol.wage_l[start_idx:end_idx, 0] = 1.0
-            sol.wage_h[start_idx:end_idx, 0] = 1.0
-
-            sol.ability[start_idx:end_idx, 0] = sol.ability_draws[start_idx:end_idx]
-            sol.theta_l[start_idx:end_idx, 0] = par.theta_l[age] + sol.ability[start_idx:end_idx, 0]
-            sol.theta_h[start_idx:end_idx, 0] = par.theta_h[age] + sol.ability[start_idx:end_idx, 0]
-            sol.mass[start_idx:end_idx, 0] = sol.mass_draws[start_idx:end_idx] * mass
-
-            start_idx = end_idx
+            sol.ability[0, age, :] = sol.ability_draws[age, :]
+            sol.theta_l[0, age, :] = par.theta_l[age] + sol.ability[0, age, :]
+            sol.theta_h[0, age, :] = par.theta_h[age] + sol.ability[0, age, :]
+            sol.mass[0, age, :] = sol.mass_draws[age, :] * mass
 
             mass = mass * par.rho[age]
 
-        sol.l_h[:end_idx, 0] = reassign_func(par, costum_percentage = 0.02)
+        sol.l_h[0, :, :] = reassign_func(par, costum_percentage = 0.02)
 
     def gen_first_period_from_ss(self):
         par = self.par
         sol = self.sol
 
-        sol.age[:, 0] = sol.age_ss[:]
-        sol.wage[:, 0] = sol.wage_ss[:]
-        sol.wage_l[:, 0] = sol.wage_l_ss[:]
-        sol.wage_h[:, 0] = sol.wage_h_ss[:]
-        sol.l_h[:, 0] = sol.l_h_ss[:]
-        sol.ability[:, 0] = sol.ability_ss[:]
-        sol.theta_l[:, 0] = sol.theta_l_ss[:]
-        sol.theta_h[:, 0] = sol.theta_h_ss[:]
-        sol.mass[:, 0] = sol.mass_ss[:]
+        sol.wage[0, :, :] = sol.wage_ss[:]
+        sol.wage_l[0, :, :] = sol.wage_l_ss[:]
+        sol.wage_h[0, :, :] = sol.wage_h_ss[:]
+        sol.l_h[0, :, :] = sol.l_h_ss[:]
+        sol.ability[0, :, :] = sol.ability_ss[:]
+        sol.theta_l[0, :, :] = sol.theta_l_ss[:]
+        sol.theta_h[0, :, :] = sol.theta_h_ss[:]
+        sol.mass[0, :, :] = sol.mass_ss[:]
 
 
     def solve(self, do_print=False):
@@ -255,8 +244,8 @@ def find_ss(par, sol, do_print=False):
             eps = 10e+10
 
         else:
-            means_prev = group_means(sol.wage[:, t - 1], sol.age[:, t - 1])
-            means_current = group_means(sol.wage[:, t], sol.age[:, t])
+            means_prev = age_means(sol.wage[t - 1])
+            means_current = age_means(sol.wage[t])
             eps = np.max(np.abs(means_prev - means_current))
 
 
@@ -280,28 +269,30 @@ def find_ss(par, sol, do_print=False):
             apply_retirement(par, sol, t)
             calc_equilibrium(par, sol, t, do_print=do_print)
 
-            sol.age_ss[:] = sol.age[:, t]
-            sol.wage_ss[:] = sol.wage[:, t]
-            sol.wage_l_ss[:] = sol.wage_l[:, t]
-            sol.wage_h_ss[:] = sol.wage_h[:, t]
-            sol.l_h_ss[:] = sol.l_h[:, t]
-            sol.ability_ss[:] = sol.ability[:, t]
-            sol.theta_l_ss[:] = sol.theta_l[:, t]
-            sol.theta_h_ss[:] = sol.theta_h[:, t]
-            sol.mass_ss[:] = sol.mass[:, t]
+            sol.wage_ss[:] = sol.wage[t]
+            sol.wage_l_ss[:] = sol.wage_l[t]
+            sol.wage_h_ss[:] = sol.wage_h[t]
+            sol.l_h_ss[:] = sol.l_h[t]
+            sol.ability_ss[:] = sol.ability[t]
+            sol.theta_l_ss[:] = sol.theta_l[t]
+            sol.theta_h_ss[:] = sol.theta_h[t]
+            sol.mass_ss[:] = sol.mass[t]
 
 
 @jit_if_enabled()
 def calc_equilibrium(par, sol, t, do_print=False):
 
-    population_size = len(sol.age[:, t])
+    # We flatten the arrays to simplify calculations, as we are working with representative agents across cohorts
+    mass_t = sol.mass[t].reshape(-1)
+    l_h_t = sol.l_h[t].reshape(-1)
+    theta_h_t = sol.theta_h[t].reshape(-1)
 
     reassigned_share = reassign_func(par)
 
-    reassigned_mass = reassigned_share * sol.mass[:, t]
-    retained_mass = sol.mass[:, t] - reassigned_mass
+    reassigned_mass = reassigned_share * mass_t
+    retained_mass = mass_t - reassigned_mass
 
-    qualification_sorted = np.argsort(sol.theta_h[:, t])[::-1]
+    qualification_sorted = np.argsort(theta_h_t)[::-1]
     reassigned_mass_by_age = np.sum(reassigned_mass.reshape(par.n, par.N_rep), axis=1)
 
     a = 0.0
@@ -335,16 +326,16 @@ def calc_equilibrium(par, sol, t, do_print=False):
     )
 
     high_mass = (1 - x_star_share) * high_floor + x_star_share * high_ceil
-    low_mass = sol.mass[:, t] - high_mass
+    low_mass = mass_t - high_mass
 
     Lh = (1 - x_star_share) * Lh_floor + x_star_share * Lh_ceil
     Ll = (1 - x_star_share) * Ll_floor + x_star_share * Ll_ceil
     K = np.nansum(high_mass)
 
-    old_l_h = sol.l_h[:, t].copy()
+    old_l_h = l_h_t.copy()
 
-    mass_denominator = np.where(sol.mass[:, t] > 0.0, sol.mass[:, t], 1.0)
-    sol.l_h[:, t] = np.where(sol.mass[:, t] > 0.0, high_mass / mass_denominator, 0.0)
+    mass_denominator = np.where(mass_t > 0.0, mass_t, 1.0)
+    sol.l_h[t] = np.where(mass_t > 0.0, high_mass / mass_denominator, 0.0).reshape(par.n, par.N_rep)
 
     if par.only_reassigned_are_hired:
         retained_high_mass = retained_mass * old_l_h
@@ -354,7 +345,7 @@ def calc_equilibrium(par, sol, t, do_print=False):
 
     else:
         retained_high_mass = retained_mass * old_l_h
-        hiring_pool_mass = sol.mass[:, t] - retained_high_mass
+        hiring_pool_mass = mass_t - retained_high_mass
         hired_high_mass = high_mass - retained_high_mass
         hiring_pool_denominator = np.where(hiring_pool_mass > 0.0, hiring_pool_mass, 1.0)
         hire_share = np.where(hiring_pool_mass > 0.0, hired_high_mass / hiring_pool_denominator, 0.0)
@@ -370,34 +361,38 @@ def calc_equilibrium(par, sol, t, do_print=False):
         wage_h_target = wage_h(par, sol, t, dY_dLl(par, Ll, Lh))
     wage_l_target = wage_l(par, sol, t, dY_dLl(par, Ll, Lh))
 
-    new_idx = slice(0, par.N_rep)
-    old_idx = slice(par.N_rep, population_size)
-
     if t == 0:
-        previous_wage_h = sol.wage_h[:population_size - par.N_rep, t].copy()
-        previous_wage_l = sol.wage_l[:population_size - par.N_rep, t].copy()
+        previous_wage_h = sol.wage_h[t, :-1].copy()
+        previous_wage_l = sol.wage_l[t, :-1].copy()
     else:
-        previous_wage_h = sol.wage_h[:population_size - par.N_rep, t - 1]
-        previous_wage_l = sol.wage_l[:population_size - par.N_rep, t - 1]
+        previous_wage_h = sol.wage_h[t - 1, :-1]
+        previous_wage_l = sol.wage_l[t - 1, :-1]
 
-    sol.wage_h[new_idx, t] = wage_h_target[new_idx]
-    sol.wage_l[new_idx, t] = wage_l_target[new_idx]
+    sol.wage_h[t, 0] = wage_h_target[0]
+    sol.wage_l[t, 0] = wage_l_target[0]
 
-    high_wage_bill = retained_high_mass[old_idx] * previous_wage_h + hired_high_mass[old_idx] * wage_h_target[old_idx]
-    low_wage_bill = retained_low_mass[old_idx] * previous_wage_l + reassigned_low_mass[old_idx] * wage_l_target[old_idx]
+    # We reshape the arrays to their original shape for further calculations
+    retained_high_mass = retained_high_mass.reshape(par.n, par.N_rep)
+    hired_high_mass = hired_high_mass.reshape(par.n, par.N_rep)
+    retained_low_mass = retained_low_mass.reshape(par.n, par.N_rep)
+    reassigned_low_mass = reassigned_low_mass.reshape(par.n, par.N_rep)
+    high_mass = high_mass.reshape(par.n, par.N_rep)
+    low_mass = low_mass.reshape(par.n, par.N_rep)
 
-    high_denominator = np.where(high_mass[old_idx] > 0.0, high_mass[old_idx], 1.0)
-    low_denominator = np.where(low_mass[old_idx] > 0.0, low_mass[old_idx], 1.0)
+    high_wage_bill = retained_high_mass[1:] * previous_wage_h + hired_high_mass[1:] * wage_h_target[1:]
+    low_wage_bill = retained_low_mass[1:] * previous_wage_l + reassigned_low_mass[1:] * wage_l_target[1:]
 
-    sol.wage_h[old_idx, t] = np.where(high_mass[old_idx] > 0.0, high_wage_bill / high_denominator, wage_h_target[old_idx])
-    sol.wage_l[old_idx, t] = np.where(low_mass[old_idx] > 0.0, low_wage_bill / low_denominator, wage_l_target[old_idx])
+    high_denominator = np.where(high_mass[1:] > 0.0, high_mass[1:], 1.0)
+    low_denominator = np.where(low_mass[1:] > 0.0, low_mass[1:], 1.0)
+
+    sol.wage_h[t, 1:] = np.where(high_mass[1:] > 0.0, high_wage_bill / high_denominator, wage_h_target[1:])
+    sol.wage_l[t, 1:] = np.where(low_mass[1:] > 0.0, low_wage_bill / low_denominator, wage_l_target[1:])
+
+    sol.wage[t] = sol.l_h[t] * sol.wage_h[t] + (1.0 - sol.l_h[t]) * sol.wage_l[t]
 
 
-    sol.wage[:, t] = (sol.l_h[:, t] * sol.wage_h[:, t] + (1.0 - sol.l_h[:, t]) * sol.wage_l[:, t])
-
-
-    sol.wage_sum_h[t] = np.nansum(sol.wage_h[:, t] * high_mass)
-    sol.wage_sum_l[t] = np.nansum(sol.wage_l[:, t] * low_mass)
+    sol.wage_sum_h[t] = np.nansum(sol.wage_h[t] * high_mass)
+    sol.wage_sum_l[t] = np.nansum(sol.wage_l[t] * low_mass)
 
     sol.Y[t] = par.A * Ll**par.alpha * Lh**(1.0 - par.alpha)
 
@@ -416,17 +411,22 @@ def calc_equilibrium(par, sol, t, do_print=False):
 @jit_if_enabled()
 def calc_Lh_Ll(par, sol, t, retained_mass, reassigned_mass, qualification_sorted, qualified_idx):
 
+    mass_t = sol.mass[t].reshape(-1)
+    l_h_t = sol.l_h[t].reshape(-1)
+    theta_h_t = sol.theta_h[t].reshape(-1)
+    theta_l_t = sol.theta_l[t].reshape(-1)
+
     if par.only_reassigned_are_hired:
         promoted = qualification_sorted[:qualified_idx + 1]
 
-        high_mass = retained_mass * sol.l_h[:, t]
+        high_mass = retained_mass * l_h_t
         high_mass[promoted] += reassigned_mass[promoted]
-        high_mass = np.clip(high_mass, 0.0, sol.mass[:, t])
+        high_mass = np.clip(high_mass, 0.0, mass_t)
 
-        low_mass = sol.mass[:, t] - high_mass
+        low_mass = mass_t - high_mass
 
-        Lh = np.nansum(sol.theta_h[:, t] * high_mass)
-        Ll = np.nansum(sol.theta_l[:, t] * low_mass)
+        Lh = np.nansum(theta_h_t * high_mass)
+        Ll = np.nansum(theta_l_t * low_mass)
 
         K = np.nansum(high_mass)
 
@@ -435,17 +435,17 @@ def calc_Lh_Ll(par, sol, t, retained_mass, reassigned_mass, qualification_sorted
     else:
         promoted = qualification_sorted[:qualified_idx + 1]
 
-        retained_high_mass = retained_mass * sol.l_h[:, t]
-        hiring_pool_mass = sol.mass[:, t] - retained_high_mass
+        retained_high_mass = retained_mass * l_h_t
+        hiring_pool_mass = mass_t - retained_high_mass
 
         high_mass = retained_high_mass.copy()
         high_mass[promoted] += hiring_pool_mass[promoted]
-        high_mass = np.clip(high_mass, 0.0, sol.mass[:, t])
+        high_mass = np.clip(high_mass, 0.0, mass_t)
 
-        low_mass = sol.mass[:, t] - high_mass
+        low_mass = mass_t - high_mass
 
-        Lh = np.nansum(sol.theta_h[:, t] * high_mass)
-        Ll = np.nansum(sol.theta_l[:, t] * low_mass)
+        Lh = np.nansum(theta_h_t * high_mass)
+        Ll = np.nansum(theta_l_t * low_mass)
         K = np.nansum(high_mass)
 
         return high_mass, low_mass, Lh, Ll, K
@@ -453,6 +453,9 @@ def calc_Lh_Ll(par, sol, t, retained_mass, reassigned_mass, qualification_sorted
 
 @jit_if_enabled()
 def marginal_gain(qualified_idx, par, sol, t, reassigned_mass, retained_mass, qualification_sorted, reassigned_mass_by_age):
+
+    mass_t = sol.mass[t].reshape(-1)
+    theta_h_t = sol.theta_h[t].reshape(-1)
 
     qualified_idx_floor = int(np.floor(qualified_idx))
     qualified_idx_share = qualified_idx - qualified_idx_floor
@@ -462,15 +465,15 @@ def marginal_gain(qualified_idx, par, sol, t, reassigned_mass, retained_mass, qu
     high_ceil, _, _, _, _ = calc_Lh_Ll(par, sol, t, retained_mass, reassigned_mass, qualification_sorted, qualified_idx_ceil)
 
     high_mass = (1.0 - qualified_idx_share) * high_floor + qualified_idx_share * high_ceil
-    low_mass = sol.mass[:, t] - high_mass
+    low_mass = mass_t - high_mass
 
-    Lh = np.nansum(sol.theta_h[:, t] * high_mass)
-    Ll = np.nansum(sol.theta_l[:, t] * low_mass)
+    Lh = np.nansum(theta_h_t * high_mass)
+    Ll = np.nansum(sol.theta_l[t].reshape(-1) * low_mass)
     K = np.nansum(high_mass)
 
     worker_floor = qualification_sorted[qualified_idx_floor]
     worker_ceil = qualification_sorted[qualified_idx_ceil]
-    marginal_theta_h = (1.0 - qualified_idx_share) * sol.theta_h[worker_floor, t] + qualified_idx_share * sol.theta_h[worker_ceil, t]
+    marginal_theta_h = (1.0 - qualified_idx_share) * theta_h_t[worker_floor] + qualified_idx_share * theta_h_t[worker_ceil]
 
     # The problem is that theta_l is arbritary given a specific age-cutoff, hence we need to estimate the marginal theta_l 
     # at all ages around the cutoff
@@ -492,29 +495,25 @@ def marginal_gain(qualified_idx, par, sol, t, reassigned_mass, retained_mass, qu
 
 @jit_if_enabled()
 def apply_retirement(par, sol, t):
-    survival_rate = par.rho[sol.age[:, t]]
-    sol.mass[:, t] = sol.mass[:, t] * survival_rate
+    sol.mass[t] = sol.mass[t] * par.rho[:, np.newaxis]
 
 
 @jit_if_enabled()
 def law_of_motions(par, sol, t):
 
-    sol.age[:, t + 1] = sol.age[:, t]
 
-    sol.l_h[par.N_rep:, t + 1] = sol.l_h[:-par.N_rep, t] # Old cohort retains their high-skilled labor status
-    sol.l_h[:par.N_rep, t + 1] = np.repeat(False, par.N_rep)  # New cohort enters as low-skilled labor
+    sol.l_h[t + 1, 1:] = sol.l_h[t, :-1] # Old cohort retains their high-skilled labor status
+    sol.l_h[t + 1, 0] = 0.0  # New cohort enters as low-skilled labor
 
-    sol.ability[par.N_rep:, t + 1] = sol.ability[:-par.N_rep, t] # Old cohort retains their ability
-    sol.ability[:par.N_rep, t + 1] = sol.ability_draws[:par.N_rep]  # New cohort draws new abilities
+    sol.ability[t + 1, 1:] = sol.ability[t, :-1] # Old cohort retains their ability
+    sol.ability[t + 1, 0] = sol.ability_draws[0]  # New cohort draws new abilities
 
-    sol.theta_l[par.N_rep:, t + 1] = par.theta_l[sol.age[par.N_rep:, t + 1]] + sol.ability[par.N_rep:, t + 1] 
-    sol.theta_l[:par.N_rep, t + 1] = par.theta_l[0] + sol.ability[:par.N_rep, t + 1]  # New cohort uses the first age's theta_l
+    sol.theta_l[t + 1] = par.theta_l[:par.n, np.newaxis] + sol.ability[t + 1]
 
-    sol.theta_h[par.N_rep:, t + 1] = par.theta_h[sol.age[par.N_rep:, t + 1]] + sol.ability[par.N_rep:, t + 1]
-    sol.theta_h[:par.N_rep, t + 1] = par.theta_h[0] + sol.ability[:par.N_rep, t + 1]  # New cohort uses the first age's theta_h
+    sol.theta_h[t + 1] = par.theta_h[:par.n, np.newaxis] + sol.ability[t + 1]
 
-    sol.mass[par.N_rep:, t + 1] = sol.mass[:-par.N_rep, t] # Old cohort's mass adjusted by survival probability
-    sol.mass[:par.N_rep, t + 1] = sol.mass_draws[:par.N_rep]  # New cohort's mass is drawn from the lognormal distribution
+    sol.mass[t + 1, 1:] = sol.mass[t, :-1] # Old cohort's mass adjusted by survival probability
+    sol.mass[t + 1, 0] = sol.mass_draws[0]  # New cohort's mass is drawn from the lognormal distribution
 
 
 
@@ -544,7 +543,7 @@ def d2Y_dLl_dLh(par, Ll, Lh):
 
 @jit_if_enabled()
 def wage_l(par, sol, t, dY_dLl):
-    return par.A*sol.theta_l[:, t]*dY_dLl
+    return par.A*sol.theta_l[t]*dY_dLl
 
 # @jit_if_enabled()
 # def wage_h(par, sol, t, dY_dLh):
@@ -553,17 +552,17 @@ def wage_l(par, sol, t, dY_dLl):
 @jit_if_enabled()
 def wage_h(par, sol, t, dY_dX):
     if par.wage_market == 'competitive':
-        return par.A*sol.theta_h[:, t]*dY_dX
+        return par.A*sol.theta_h[t]*dY_dX
     elif par.wage_market == 'monopsony':
         return par.mu*wage_l(par, sol, t, dY_dX) # Individuals earn a markup of the low-skilled wage based on the parameter mu
 
 @jit_if_enabled()
 def func_Lh(par, sol, t):
-    return np.nansum(sol.theta_h[:, t] * sol.l_h[:, t] * sol.mass[:, t])
+    return np.nansum(sol.theta_h[t] * sol.l_h[t] * sol.mass[t])
 
 @jit_if_enabled()
 def func_Ll(par, sol, t):
-    return np.nansum(sol.theta_l[:, t] * (1 - sol.l_h[:, t]) * sol.mass[:, t])
+    return np.nansum(sol.theta_l[t] * (1 - sol.l_h[t]) * sol.mass[t])
 
 
 @jit_if_enabled()
@@ -578,13 +577,8 @@ def reassign_func(par, costum_percentage = -1.0):
 
 
 @jit_if_enabled()
-def group_means(a, b):
-    mask = ~np.isnan(a) & ~np.isnan(b)
-    a = a[mask]
-    b = b[mask]
-
-    groups = np.unique(b)
-    means = np.array([a[b == g].mean() for g in groups])
+def age_means(a):
+    means = np.array([np.mean(a[age, :]) for age in range(a.shape[0])])
 
     return means
 
