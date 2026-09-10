@@ -209,9 +209,41 @@ def plot_wage_gap(model, young_max, old_min, x_size=8, y_size=5):
 
     plt.figure(figsize=(x_size, y_size))
     plt.plot(np.arange(T), wage_gap_index, linewidth=2)
-    plt.title(f"Wage Gap: Old (age >= {old_min}) - Young (age <= {young_max})")
+    plt.title(f"Wage gap between young (25-{young_max + 25}) and old ({old_min + 25}+) workers")
     plt.xlabel("Time")
     plt.ylabel("Wage-gap index (first period = 100)")
+    plt.tight_layout()
+    plt.show()
+
+
+
+
+def plot_wage_gap_single(model, young_age, old_age, x_size=8, y_size=5):
+    plt.style.use("seaborn-v0_8-whitegrid")
+
+    def weighted_mean(values, weights):
+        valid = np.isfinite(values) & np.isfinite(weights) & (weights > 0.0)
+        if not np.any(valid):
+            return np.nan
+        return np.sum(values[valid] * weights[valid]) / np.sum(weights[valid])
+
+    valid_periods = np.where(np.any(np.isfinite(model.sol.mass), axis=(1, 2)))[0]
+    T = valid_periods[-1] + 1
+    wage_gap = np.full(T, np.nan)
+    age_grid = np.arange(model.par.n)
+    young = age_grid == young_age
+    old = age_grid == old_age
+
+    for t in range(T):
+        young_wage = weighted_mean(model.sol.wage[t, young], model.sol.mass[t, young])
+        old_wage = weighted_mean(model.sol.wage[t, old], model.sol.mass[t, old])
+        wage_gap[t] = old_wage - young_wage
+
+    plt.figure(figsize=(x_size, y_size))
+    plt.plot(np.arange(T), wage_gap, linewidth=2)
+    plt.title(f"Wage Gap: Age {old_age} - Young (age {young_age})")
+    plt.xlabel("Time")
+    plt.ylabel("Wage gap")
     plt.tight_layout()
     plt.show()
 
@@ -239,7 +271,7 @@ def plot_mean_age_high_skill(model, x_size=8, y_size=5):
     finite_periods = np.where(np.isfinite(mean_age))[0]
     if finite_periods.size == 0 or np.isclose(mean_age[finite_periods[0]], 0.0):
         raise ValueError("Mean age cannot be normalized because its first finite value is zero or missing")
-    mean_age_index = 100.0 * mean_age / mean_age[finite_periods[0]]
+    mean_age_index = mean_age + 25
 
     plt.figure(figsize=(x_size, y_size))
     plt.plot(np.arange(T), mean_age_index, linewidth=2)

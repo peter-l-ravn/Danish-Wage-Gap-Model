@@ -16,6 +16,8 @@ from EconModel import EconModelClass, jit
 from numba import njit, prange
 from jit_module import jit_if_enabled
 
+import pandas as pd
+
 class ModelClass(EconModelClass):
 
     def settings(self):
@@ -34,10 +36,8 @@ class ModelClass(EconModelClass):
 
         par.T_max = 200 # Max solver iterations
 
-        par.N_rep = 100 # Number of represenatative agents
-        par.N_1 = 1 # Total mass of each cohort
-
-        par.n = 31 # Number of cohorts
+        par.N_rep = 200 # Number of represenatative agents
+        par.N_first = 1 # Total mass of each cohort
 
         par.A =  1.0 # Total factor productivity
         par.alpha =  0.1 # Output elasticity of low-skilled labor
@@ -46,12 +46,15 @@ class ModelClass(EconModelClass):
         par.gamma = 1.5
         par.delta = 0.05
 
-        par.theta_mean = -0.0
+        par.theta_mean = 0.0
         par.theta_std = 0.5
 
-        x = np.linspace(1.0, par.n, par.n)
-        rho_shape = 5.0
-        par.rho = -((x / par.n) ** rho_shape) + 1 # Cohort survival probabilities
+        # x = np.linspace(1.0, par.n, par.n)
+        # rho_shape = 5.0
+        # par.rho = -((x / par.n) ** rho_shape) + 1 # Cohort survival probabilities
+
+        par.rho = 1 - pd.read_csv('Data/rho.csv', header=0)["rho"].values
+        par.n = par.rho.shape[0] # Number of age cohorts
 
 
     def update_params(self):
@@ -120,7 +123,7 @@ class ModelClass(EconModelClass):
             par.theta_mean,
             par.theta_std,
             par.N_rep,
-            total_mass=par.N_1,
+            total_mass=par.N_first,
         )
         sol.ability_draws = np.tile(ability_draws, (par.n, 1))
         sol.mass_draws = np.tile(mass_draws, (par.n, 1))
@@ -136,14 +139,19 @@ class ModelClass(EconModelClass):
             sol.wage[0, age, :] = 1.0
             sol.wage_l[0, age, :] = 1.0
             sol.wage_h[0, age, :] = 1.0
-            sol.tenure[0, age, :] = 0.0
+
+            share_tenure = 0.5
+            n_tenure = int(np.floor(par.N_rep * share_tenure))
+            sol.tenure[0, age, :n_tenure] = 0.0
+            sol.tenure[0, age, n_tenure:] = age
 
             sol.ability[0, age, :] = sol.ability_draws[age, :]
             sol.theta_l[0, age, :] = productivity_low(par, sol.ability[0, age, :], sol.tenure[0, age, :])
             sol.theta_h[0, age, :] = productivity_high(par, sol.ability[0, age, :], sol.tenure[0, age, :])
             sol.mass[0, age, :] = sol.mass_draws[age, :] * mass
 
-            mass = mass * par.rho[age]
+            mass = mass * (1 - par.rho[age])
+
 
         sol.l_h[0, :, :] = 0.0
 
@@ -216,19 +224,20 @@ def find_ss(par, sol, do_print=False):
             eps = np.inf
 
         else:
-            wage_change = np.max(
-                np.abs(sol.wage[t] - sol.wage[t - 1])
+            mass_change = np.max(
+                np.abs(sol.mass[t] - sol.mass[t - 1])
             )
 
-            allocation_change = np.max(
-                np.abs(sol.l_h[t] - sol.l_h[t - 1])
-            )
+            # allocation_change = np.max(
+            #     np.abs(sol.l_h[t] - sol.l_h[t - 1])
+            # )
 
             tenure_change = np.max(
                 np.abs(sol.tenure[t] - sol.tenure[t - 1])
             )
 
-            eps = max(wage_change, allocation_change, tenure_change)
+            eps = max(mass_change,  tenure_change)
+            
 
             if not np.isfinite(eps):
                 raise ValueError(
@@ -389,7 +398,7 @@ def high_skill_allocation(par, sol, t, do_print=False):
 
 @jit_if_enabled()
 def apply_retirement(par, sol, t):
-    sol.mass[t] = sol.mass[t] * par.rho[:, np.newaxis]
+    sol.mass[t] = sol.mass[t] * (1 - par.rho[:, np.newaxis])
 
 
 @jit_if_enabled()
