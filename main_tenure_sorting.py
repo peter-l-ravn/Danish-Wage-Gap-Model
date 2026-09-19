@@ -53,7 +53,7 @@ class ModelClass(EconModelClass):
         # rho_shape = 5.0
         # par.rho = -((x / par.n) ** rho_shape) + 1 # Cohort survival probabilities
 
-        par.rho = 1 - pd.read_csv('Data/rho.csv', header=0)["rho"].values
+        par.rho = 1 - pd.read_csv('Data/survival.csv', header=0)["rho"].values
         par.n = par.rho.shape[0] # Number of age cohorts
 
 
