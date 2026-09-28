@@ -162,6 +162,7 @@ def plot_model(model_baseline, time=None):
 
     axes[1].plot(high_skill_share_time_baseline, linewidth=2)
     axes[1].set(title="Mean High-Skill Share over Time", xlabel="Time", ylabel="Mass-weighted high-skill share")
+    axes[1].ticklabel_format(axis='y', style='plain', useOffset=False)
 
     axes[2].plot(age_groups, wage_age_baseline, marker="o", linewidth=2)
     axes[2].set(title="Mean Wage by Age", xlabel="Age", ylabel="Mass-weighted mean wage")
@@ -181,6 +182,68 @@ def plot_model(model_baseline, time=None):
     plt.show()
 
 
+def plot_wage_high_low(model_baseline, time=None):
+    plt.style.use("seaborn-v0_8-whitegrid")
+
+    def weighted_mean(values, weights):
+        valid = np.isfinite(values) & np.isfinite(weights) & (weights > 0.0)
+        if not np.any(valid):
+            return np.nan
+        return np.sum(values[valid] * weights[valid]) / np.sum(weights[valid])
+
+    def mean_by_age(model, variable, t, age_groups, skill=None):
+        total_mass = model.sol.mass[t]
+        high_share = np.clip(model.sol.l_h[t], 0.0, 1.0)
+
+        if skill == "high":
+            weights = high_share * total_mass
+        elif skill == "low":
+            weights = (1.0 - high_share) * total_mass
+        else:
+            weights = total_mass
+
+        means = []
+        for age in age_groups:
+            means.append(weighted_mean(variable[t, age], weights[age]))
+
+        return np.array(means)
+
+    if time is None:
+        valid_periods = np.where(np.any(np.isfinite(model_baseline.sol.mass), axis=(1, 2)))[0]
+        time = valid_periods[-1] + 1
+
+    t_baseline = time - 1
+    age_groups = np.arange(model_baseline.par.n)
+
+    wage_high_baseline = mean_by_age(
+        model_baseline,
+        model_baseline.sol.wage_h,
+        t_baseline,
+        age_groups,
+        skill="high"
+    )
+
+    wage_low_baseline = mean_by_age(
+        model_baseline,
+        model_baseline.sol.wage_l,
+        t_baseline,
+        age_groups,
+        skill="low"
+    )
+
+    plt.figure(figsize=(8, 5))
+    plt.plot(age_groups, wage_high_baseline, linewidth=2, label="High-skilled", color='blue')
+    plt.plot(age_groups, wage_low_baseline, linewidth=2, label="Low-skilled", color='red')
+
+    # plt.title("Wages by Age and Skill Level")
+    plt.xlabel("Age")
+    plt.ylabel("Mass-weighted mean wage")
+    plt.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+
 def plot_wage_gap(model, young_max, old_min, x_size=8, y_size=5):
     plt.style.use("seaborn-v0_8-whitegrid")
 
@@ -192,26 +255,33 @@ def plot_wage_gap(model, young_max, old_min, x_size=8, y_size=5):
 
     valid_periods = np.where(np.any(np.isfinite(model.sol.mass), axis=(1, 2)))[0]
     T = valid_periods[-1] + 1
-    wage_gap = np.full(T, np.nan)
+    young_wage = np.full(T, np.nan)
+    old_wage = np.full(T, np.nan)
     age_grid = np.arange(model.par.n)
     young = age_grid <= young_max
     old = age_grid >= old_min
 
     for t in range(T):
-        young_wage = weighted_mean(model.sol.wage[t, young], model.sol.mass[t, young])
-        old_wage = weighted_mean(model.sol.wage[t, old], model.sol.mass[t, old])
-        wage_gap[t] = old_wage - young_wage
+        young_wage[t] = weighted_mean(model.sol.wage[t, young], model.sol.mass[t, young])
+        old_wage[t] = weighted_mean(model.sol.wage[t, old], model.sol.mass[t, old])
 
-    finite_periods = np.where(np.isfinite(wage_gap))[0]
-    if finite_periods.size == 0 or np.isclose(wage_gap[finite_periods[0]], 0.0):
-        raise ValueError("The wage gap cannot be normalized because its first finite value is zero or missing")
-    wage_gap_index = 100.0 * wage_gap / wage_gap[finite_periods[0]]
+    wage_ratio = np.full(T, np.nan)
+    valid_wages = np.isfinite(young_wage) & np.isfinite(old_wage) & ~np.isclose(young_wage, 0.0)
+    wage_ratio[valid_wages] = 100.0 * old_wage[valid_wages] / young_wage[valid_wages]
+
+    baseline = np.where(np.isfinite(wage_ratio))[0]
+    if baseline.size == 0 or np.isclose(wage_ratio[baseline[0]], 0.0):
+        raise ValueError("The initial old-to-young wage ratio must be finite and non-zero")
+
+    initial_ratio = wage_ratio[baseline[0]]
+    wage_gap = 100.0 * (wage_ratio / initial_ratio - 1.0)
+    wage_gap[baseline[0]] = 0.0
 
     plt.figure(figsize=(x_size, y_size))
-    plt.plot(np.arange(T), wage_gap_index, linewidth=2)
-    plt.title(f"Wage gap between young (25-{young_max + 25}) and old ({old_min + 25}+) workers")
+    plt.plot(np.arange(T), wage_gap, linewidth=2)
+    # plt.title(f"Wage gap between young (25-{young_max + 25}) and old ({old_min + 25}+) workers")
     plt.xlabel("Time")
-    plt.ylabel("Wage-gap index (first period = 100)")
+    plt.ylabel("Difference (%)")
     plt.tight_layout()
     plt.show()
 
@@ -241,7 +311,7 @@ def plot_wage_gap_single(model, young_age, old_age, x_size=8, y_size=5):
 
     plt.figure(figsize=(x_size, y_size))
     plt.plot(np.arange(T), wage_gap, linewidth=2)
-    plt.title(f"Wage Gap: Age {old_age} - Young (age {young_age})")
+    # plt.title(f"Wage Gap: Age {old_age} - Young (age {young_age})")
     plt.xlabel("Time")
     plt.ylabel("Wage gap")
     plt.tight_layout()
@@ -275,9 +345,9 @@ def plot_mean_age_high_skill(model, x_size=8, y_size=5):
 
     plt.figure(figsize=(x_size, y_size))
     plt.plot(np.arange(T), mean_age_index, linewidth=2)
-    plt.title("Average Age of High-Skilled Workers")
+    # plt.title("Average Age of High-Skilled Workers")
     plt.xlabel("Time")
-    plt.ylabel("Mean-age index (first period = 100)")
+    plt.ylabel("Age")
     plt.tight_layout()
     plt.show()
 
@@ -359,6 +429,7 @@ def plot_high_skill_shares_young_old(model, young_max, old_min, x_size=8, y_size
     plt.plot(np.arange(T), young_share_index, linewidth=2, label=f"Young (age <= {young_max})")
     plt.plot(np.arange(T), old_share_index, linewidth=2, label=f"Old (age >= {old_min})")
     plt.title("High-Skill Share among Young and Old Workers")
+    plt.ticklabel_format(axis='y', style='plain', useOffset=False)
     plt.xlabel("Time")
     plt.ylabel("High-skill-share index (first period = 100)")
     plt.legend()

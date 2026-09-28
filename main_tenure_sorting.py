@@ -8,6 +8,7 @@ from consav.grids import nonlinspace
 from consav.linear_interp import interp_1d, interp_1d_vec
 from consav.quadrature import log_normal_gauss_hermite
 
+from codex_file_made import wage_l
 from optimizers import golden, brentq, golden_section_int_modified, golden_section_modified
 
 from IPython.display import display, Math
@@ -36,7 +37,7 @@ class ModelClass(EconModelClass):
 
         par.T_max = 200 # Max solver iterations
 
-        par.N_rep = 200 # Number of represenatative agents
+        par.N_rep = 400 # Number of represenatative agents
         par.N_first = 1 # Total mass of each cohort
 
         par.A =  1.0 # Total factor productivity
@@ -46,6 +47,8 @@ class ModelClass(EconModelClass):
         par.gamma = 1.5
         par.delta = 0.05
 
+        par.beta = 0.0
+
         par.theta_mean = 0.0
         par.theta_std = 0.5
 
@@ -53,7 +56,8 @@ class ModelClass(EconModelClass):
         # rho_shape = 5.0
         # par.rho = -((x / par.n) ** rho_shape) + 1 # Cohort survival probabilities
 
-        par.rho = 1 - pd.read_csv('Data/survival.csv', header=0)["rho"].values
+        # par.rho = 1 - pd.read_csv('Data/survival.csv', header=0)["rho"].values
+        par.rho = np.loadtxt("Data/rho_2008.csv", delimiter=",")
         par.n = par.rho.shape[0] # Number of age cohorts
 
 
@@ -289,6 +293,8 @@ def calc_equilibrium(par, sol, t, do_print=False):
 
     sol.wage_h[t] = wage_h_func(par, sol, t, sol.theta_h[t], marginal_product_high)
     sol.wage_l[t] = wage_l_func(par, sol, t, sol.theta_l[t], marginal_product_low)
+
+
     sol.wage[t] = sol.l_h[t] * sol.wage_h[t] + (1.0 - sol.l_h[t]) * sol.wage_l[t]
 
     sol.wage_sum_h[t] = np.nansum(sol.l_h[t] * sol.wage_h[t] * sol.mass[t])
@@ -367,6 +373,8 @@ def high_skill_allocation(par, sol, t, do_print=False):
     # We initially rank everyone with aggregate marginal product normalized to 1, since it affect both groups equally.
     wage_h_index = wage_h_func(par, sol, t, sol.theta_h[t], np.ones(sol.theta_h[t].shape))
     wage_l_index = wage_l_func(par, sol, t, sol.theta_l[t], np.ones(sol.theta_l[t].shape))
+
+
     relative_wage_index = wage_h_index / np.maximum(wage_l_index, tiny)
     order_by_age = np.argsort(relative_wage_index, axis=1)[:, ::-1]
 
@@ -392,7 +400,7 @@ def high_skill_allocation(par, sol, t, do_print=False):
 
     else:
         return np.zeros(sol.theta_h[t].shape)
-    
+
     return allocation_from_productivity_cutoff(cutoff, relative_wage_index, mass, order_by_age)
 
 
@@ -412,7 +420,7 @@ def law_of_motions(par, sol, t):
     sol.ability[t + 1, 0] = sol.ability_draws[0]  # New cohort draws new abilities
 
     representative_high_skill = sol.l_h[t, :-1] >= 1.0 - 1e-12
-    sol.tenure[t + 1, 1:] = sol.tenure[t, :-1] + representative_high_skill # Only unsplit high-skilled bins update the single stored tenure; partial-bin mass is integrated but not propagated as one averaged worker
+    sol.tenure[t + 1, 1:] = sol.tenure[t, :-1] + representative_high_skill + par.beta * (1 - representative_high_skill) # Only unsplit high-skilled bins update the single stored tenure; partial-bin mass is integrated but not propagated as one averaged worker
     sol.tenure[t + 1, 0] = 0.0  # New cohort starts with zero tenure2
 
     sol.theta_l[t + 1] = productivity_low(par, sol.ability[t + 1], sol.tenure[t + 1])
@@ -450,6 +458,10 @@ def d2Y_dLl_dLh(par, Ll, Lh):
 @jit_if_enabled()
 def wage_l_func(par, sol, t, theta_l, dY_dLl_value):
     return np.ones_like(theta_l)
+
+# @jit_if_enabled()
+# def wage_l_func(par, sol, t, theta_l, dY_dLl_value):
+#     return par.A * theta_l * dY_dLl_value
 
 
 
