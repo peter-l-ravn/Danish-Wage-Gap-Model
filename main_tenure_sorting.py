@@ -19,6 +19,8 @@ from jit_module import jit_if_enabled
 
 import pandas as pd
 
+import copy 
+
 class ModelClass(EconModelClass):
 
     def settings(self):
@@ -37,20 +39,21 @@ class ModelClass(EconModelClass):
 
         par.T_max = 200 # Max solver iterations
 
-        par.N_rep = 400 # Number of represenatative agents
+        par.N_rep = 500 # Number of represenatative agents
         par.N_first = 1 # Total mass of each cohort
 
-        par.A =  1.0 # Total factor productivity
-        par.alpha =  0.1 # Output elasticity of low-skilled labor
+        par.A =  1.50 # Total factor productivity
+        par.alpha =  0.05 # Output elasticity of low-skilled labor
         par.c =  0.0 # Cost of hiring high-skilled labor
+        par.competitive_wages = False # True: both jobs pay marginal products and low-skill productivity is one
 
-        par.gamma = 1.5
-        par.delta = 0.05
+        par.gamma = 2.0
+        par.delta = 0.02
 
-        par.beta = 0.0
+        par.beta = 0.35
 
-        par.theta_mean = 0.0
-        par.theta_std = 0.5
+        par.theta_mean = -0.25
+        par.theta_std = 0.125
 
         # x = np.linspace(1.0, par.n, par.n)
         # rho_shape = 5.0
@@ -209,6 +212,46 @@ class ModelClass(EconModelClass):
 
 
 
+def generate_shock(model, first_period=10, second_period=20):
+
+    rho_baseline = model.par.rho.copy()
+
+    # Periods 0–9: baseline
+    model.par.rho = rho_baseline.copy()
+    model.par.T_max = first_period
+    model.generate_transition(t_end=first_period - 1, do_print=False)
+    sol1 = copy.deepcopy(model.sol)
+
+    # Initial steady-state period plus 20 shocked periods
+    rho_shock = np.loadtxt("Data/rho_2023.csv", delimiter=",")
+    # rho_shock = np.concatenate([rho_baseline[:2], rho_baseline[:-2]])
+    model.par.rho = rho_shock
+    model.par.T_max = second_period + 1
+    model.generate_transition(t_end=second_period, do_print=False)
+    sol2 = copy.deepcopy(model.sol)
+
+    # Drop sol2 period 0 because it duplicates the pre-shock steady state
+    for name, x1 in vars(sol1).items():
+        x2 = getattr(sol2, name)
+
+        if (
+            isinstance(x1, np.ndarray)
+            and isinstance(x2, np.ndarray)
+            and x1.ndim >= 1
+            and x2.ndim == x1.ndim
+            and x1.shape[0] == first_period
+            and x2.shape[0] == second_period + 1
+            and x1.shape[1:] == x2.shape[1:]
+        ):
+            setattr(
+                model.sol,
+                name,
+                np.concatenate((x1, x2[1:]), axis=0),
+            )
+
+    model.par.T_max = first_period + second_period
+
+    return model
 
 
 @jit_if_enabled()
@@ -336,7 +379,7 @@ def allocation_from_productivity_cutoff(cutoff, relative_wage_index, mass, order
 
         fractional_share = (scores[upper_position] - cutoff) / score_distance if score_distance > tiny else 0.0
 
-        allocation[age, ordered_indices[lower_position]] = np.clip(fractional_share, 0.0, 1.0)
+        allocation[age, ordered_indices[lower_position]] = min(max(fractional_share, 0.0), 1.0)
 
     return allocation
 
@@ -376,10 +419,19 @@ def high_skill_allocation(par, sol, t, do_print=False):
 
 
     relative_wage_index = wage_h_index / np.maximum(wage_l_index, tiny)
-    order_by_age = np.argsort(relative_wage_index, axis=1)[:, ::-1]
+    order_by_age = np.empty(relative_wage_index.shape, dtype=np.int64)
 
-    a = float(np.min(relative_wage_index[active]))
-    b = float(np.max(relative_wage_index[active]))
+    # Previous vesrion had this but did not work with jit compilation
+    # order_by_age = np.argsort(relative_wage_index, axis=1)[:, ::-1]
+    # a = float(np.min(relative_wage_index[active]))
+    # b = float(np.max(relative_wage_index[active]))
+
+    for age in range(relative_wage_index.shape[0]):
+        order_by_age[age] = np.argsort(relative_wage_index[age])[::-1]
+
+    active_scores = relative_wage_index.ravel()[active.ravel()]
+    a = float(np.min(active_scores))
+    b = float(np.max(active_scores))
 
     optimizer_args = (par, sol, t, relative_wage_index, mass, order_by_age)
 
@@ -457,11 +509,9 @@ def d2Y_dLl_dLh(par, Ll, Lh):
 
 @jit_if_enabled()
 def wage_l_func(par, sol, t, theta_l, dY_dLl_value):
+    if par.competitive_wages:
+        return par.A * theta_l * dY_dLl_value
     return np.ones_like(theta_l)
-
-# @jit_if_enabled()
-# def wage_l_func(par, sol, t, theta_l, dY_dLl_value):
-#     return par.A * theta_l * dY_dLl_value
 
 
 
@@ -502,9 +552,12 @@ def create_weighted_lognormal_distribution(mean, sigma, n_obs, total_mass=1.0):
     return abilities, weights
 
 
-
+@jit_if_enabled()
 def productivity_low(par, ability, tenure):
-    return ability   # Example: low-skilled productivity increases with ability and tenure
+    if par.competitive_wages:
+        return np.ones_like(ability)
+    return ability  # Baseline production input; the low-skill wage remains fixed at one
 
+@jit_if_enabled()
 def productivity_high(par, ability, tenure):
     return ability + par.gamma * (1 - np.exp(-par.delta * tenure))  # Example: high-skilled productivity increases with ability and tenure

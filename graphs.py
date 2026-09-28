@@ -232,8 +232,8 @@ def plot_wage_high_low(model_baseline, time=None):
     )
 
     plt.figure(figsize=(8, 5))
-    plt.plot(age_groups, wage_high_baseline, linewidth=2, label="High-skilled", color='blue')
-    plt.plot(age_groups, wage_low_baseline, linewidth=2, label="Low-skilled", color='red')
+    plt.plot(age_groups + 25, wage_high_baseline, linewidth=2, label="High-skilled", color='blue')
+    plt.plot(age_groups + 25, wage_low_baseline, linewidth=2, label="Low-skilled", color='red')
 
     # plt.title("Wages by Age and Skill Level")
     plt.xlabel("Age")
@@ -244,15 +244,14 @@ def plot_wage_high_low(model_baseline, time=None):
     plt.show()
 
 
-def plot_wage_gap(model, young_max, old_min, x_size=8, y_size=5):
-    plt.style.use("seaborn-v0_8-whitegrid")
 
+def wage_gap_func(model, young_max, old_min):
     def weighted_mean(values, weights):
         valid = np.isfinite(values) & np.isfinite(weights) & (weights > 0.0)
         if not np.any(valid):
             return np.nan
         return np.sum(values[valid] * weights[valid]) / np.sum(weights[valid])
-
+    
     valid_periods = np.where(np.any(np.isfinite(model.sol.mass), axis=(1, 2)))[0]
     T = valid_periods[-1] + 1
     young_wage = np.full(T, np.nan)
@@ -276,6 +275,17 @@ def plot_wage_gap(model, young_max, old_min, x_size=8, y_size=5):
     initial_ratio = wage_ratio[baseline[0]]
     wage_gap = 100.0 * (wage_ratio / initial_ratio - 1.0)
     wage_gap[baseline[0]] = 0.0
+
+    return wage_gap, T
+
+
+
+def plot_wage_gap(model, young_max, old_min, x_size=8, y_size=5):
+    plt.style.use("seaborn-v0_8-whitegrid")
+
+
+    wage_gap, T = wage_gap_func(model, young_max, old_min)
+
 
     plt.figure(figsize=(x_size, y_size))
     plt.plot(np.arange(T), wage_gap, linewidth=2)

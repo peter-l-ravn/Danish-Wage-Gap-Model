@@ -11,7 +11,7 @@ from math import copysign, isfinite
 
 from jit_module import jit_if_enabled
 
-# @njit
+@jit_if_enabled()
 def golden(obj,a,b,args=(),tol=1e-6):
     """ golden section search optimizer
     
@@ -71,7 +71,7 @@ def golden(obj,a,b,args=(),tol=1e-6):
     
 
 
-
+@jit_if_enabled()
 def brentq(f, a, b, args=(), xtol=1e-12, rtol=4.440892098500626e-16, maxiter=100):
     """
     Brent's root-finding method on [a, b].
