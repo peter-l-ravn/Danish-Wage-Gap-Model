@@ -1,7 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import graphs
 
-def plot_shares(first_share, second_share, third_share, fourth_share, title, normalize=False):
+def plot_shares(first_share, second_share, third_share, fourth_share, title, normalize=False, *, show_titles=None, show=True):
 
     groups = ("Low job", "High job")
 
@@ -20,8 +21,8 @@ def plot_shares(first_share, second_share, third_share, fourth_share, title, nor
 
     fig, ax = plt.subplots()
 
-    bars_before = ax.bar(x - width/2, before, width, label="Before shock", color="#008cff", edgecolor="#ffffff")
-    bars_after = ax.bar(x + width/2, after, width, label="After shock", color="#ff2020", hatch="", edgecolor="#ffffff")
+    bars_before = ax.bar(x - width/2, before, width, label="Before shock", color=graphs.BLUE, edgecolor="#ffffff")
+    bars_after = ax.bar(x + width/2, after, width, label="After shock", color=graphs.RED, hatch="", edgecolor="#ffffff")
 
     ax.bar_label(bars_before, fmt="%.2f", padding=3)
     ax.bar_label(bars_after, fmt="%.2f", padding=3)
@@ -34,19 +35,21 @@ def plot_shares(first_share, second_share, third_share, fourth_share, title, nor
         ax.set_ylim(0, 1)
     else:
         ax.set_ylim(0, max(max(before), max(after)) * 1.2)
-    # ax.set_xlabel("Job type")
-    ax.set_title(title)
-    # ax.set_axisbelow(True)
-    # ax.grid(True, linestyle="--", alpha=0.6, zorder=0)
+    titles = graphs.SHOW_TITLES if show_titles is None else show_titles
+    if titles:
+        ax.set_title(title)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=2)
-    # ax.legend()
 
+    ax.set_axisbelow(True)
+    ax.grid(True, color="0.8", linewidth=0.8)
     plt.tight_layout()
-    plt.show()
+    if show:
+        plt.show()
+    return fig, ax
 
 
 
-def plot_series(series, title, ylabel="Average wage of young workers"):
+def plot_series(series, title, ylabel="Average wage of young workers", *, show_titles=None, show=True):
 
     fig, ax = plt.subplots(figsize=(8, 5))
 
@@ -55,20 +58,24 @@ def plot_series(series, title, ylabel="Average wage of young workers"):
     ax.plot(
         x,
         series,
-        color="#008cff",
+        color=graphs.BLUE,
         linewidth=2.0,
     )
 
-    ax.set_title(title)
+    titles = graphs.SHOW_TITLES if show_titles is None else show_titles
+    if titles:
+        ax.set_title(title)
     ax.set_ylabel(ylabel)
     ax.set_xlabel("Time")
 
-    # Match the clean style from your example
     ax.spines["top"].set_visible(True)
     ax.spines["right"].set_visible(True)
 
-    # Optional: small margins for aesthetics
     ax.margins(x=0.02)
 
+    ax.set_axisbelow(True)
+    ax.grid(True, color="0.8", linewidth=0.8)
     plt.tight_layout()
-    plt.show()
+    if show:
+        plt.show()
+    return fig, ax

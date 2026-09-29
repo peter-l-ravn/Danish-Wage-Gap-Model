@@ -35,6 +35,9 @@ class ModelClass(EconModelClass):
         # unpack
         par = self.par
 
+        par.competitive_wages = False # True: both jobs pay marginal products and low-skill productivity is one
+        par.sticky_jobs = False # True: incumbents retain their high-skilled jobs even if they are no longer the most productive
+
         par.tol = 1e-6 # Convergence tolerance
 
         par.T_max = 200 # Max solver iterations
@@ -44,16 +47,13 @@ class ModelClass(EconModelClass):
 
         par.A =  1.50 # Total factor productivity
         par.alpha =  0.05 # Output elasticity of low-skilled labor
-        par.c =  0.0 # Cost of hiring high-skilled labor
-        par.competitive_wages = False # True: both jobs pay marginal products and low-skill productivity is one
-
-        par.gamma = 2.0
+        par.gamma = 1.2
         par.delta = 0.02
-
         par.beta = 0.35
-
-        par.theta_mean = -0.25
+        par.theta_mean = -0.55
         par.theta_std = 0.125
+
+        par.c =  0.0 # Cost of hiring high-skilled labor
 
         # x = np.linspace(1.0, par.n, par.n)
         # rho_shape = 5.0
@@ -389,6 +389,8 @@ def productivity_cutoff_equation(cutoff, par, sol, t, relative_wage_index, mass,
     """Return the difference between the proposed productivity cutoff and the equilibrium wage-factor cutoff."""
     allocation = allocation_from_productivity_cutoff(cutoff, relative_wage_index, mass, order_by_age)
 
+    allocation = protect_high_jobs(par, sol, t, allocation)
+
     Lh = np.nansum(allocation * sol.theta_h[t] * mass)
     Ll = np.nansum((1.0 - allocation) * sol.theta_l[t] * mass)
 
@@ -451,9 +453,32 @@ def high_skill_allocation(par, sol, t, do_print=False):
         cutoff = a
 
     else:
-        return np.zeros(sol.theta_h[t].shape)
+        # No new assignments, but incumbents retain their high jobs.
+        return protect_high_jobs(
+            par, sol, t, np.zeros(sol.theta_h[t].shape)
+        )
 
-    return allocation_from_productivity_cutoff(cutoff, relative_wage_index, mass, order_by_age)
+    allocation = allocation_from_productivity_cutoff(
+        cutoff, relative_wage_index, mass, order_by_age
+    )
+
+    return protect_high_jobs(par, sol, t, allocation)
+
+
+
+@jit_if_enabled()
+def protect_high_jobs(par, sol, t, allocation):
+    if not par.sticky_jobs:
+        return allocation
+
+    inherited = np.clip(sol.l_h[t], 0.0, 1.0)
+    active = (
+        np.isfinite(sol.mass[t])
+        & (sol.mass[t] > 1e-12)
+        & np.isfinite(sol.theta_h[t])
+        & np.isfinite(sol.theta_l[t])
+    )
+    return np.where(active, np.maximum(allocation, inherited), 0.0)
 
 
 @jit_if_enabled()
