@@ -45,13 +45,23 @@ class ModelClass(EconModelClass):
         par.N_rep = 500 # Number of represenatative agents
         par.N_first = 1 # Total mass of each cohort
 
-        par.A =  1.50 # Total factor productivity
-        par.alpha =  0.05 # Output elasticity of low-skilled labor
-        par.gamma = 1.2
-        par.delta = 0.02
-        par.beta = 0.35
-        par.theta_mean = -0.55
-        par.theta_std = 0.125
+        # par.A =  1.07086 # Total factor productivity
+        # par.alpha =  0.05 # Output elasticity of low-skilled labor
+        # par.gamma = 0.65426
+        # par.delta = 0.00720
+        # par.beta = 0.60737
+        # par.theta_mean = -0.02439
+        # par.theta_std = 0.01528
+        par.A =  4.527167085982246
+        par.alpha =  0.22652447322054842
+        par.gamma =  1.0473611990858147
+        par.delta =  0.1629025467659372
+        par.beta =  0.010033905982535979
+        par.theta_mean =  -0.9784268237023103
+        par.theta_std =  0.039853368338574016
+
+
+
 
         par.c =  0.0 # Cost of hiring high-skilled labor
 

@@ -260,14 +260,18 @@ def plot_low_skill_shares_young_old(model, young_max, old_min, x_size=8, y_size=
 
 def plot_skill_comparison(model, young_max, old_min, *, show_titles=None,
                           age_start=None, ages_in_years=False, normalize=True, show=True):
+    
     """Four panels: high/low wages and employment shares for young/old workers."""
+
     fig, axes = plt.subplots(2, 2, figsize=(13, 8), layout="constrained")
+
     for row, skill in enumerate(("high", "low")):
         for col, measure in enumerate(("wage", "share")):
             _plot_group_outcomes(model, young_max, old_min, 8, 5, skill=skill,
                                  measure=measure, ax=axes[row, col], show=False,
                                  normalize=normalize, show_titles=show_titles,
                                  age_start=age_start, ages_in_years=ages_in_years)
+            
     return _finish(fig, axes, show)
 
 
@@ -290,6 +294,12 @@ def plot_shock_summary(model, young_max, old_min, *, show_titles=None,
     return _finish(fig, axes, show)
 
 
+def _distribution_by_age(model, t, skill=None):
+    mass = _weights(model, t, skill)
+    age_mass = mass.sum(axis=1)
+    distribution = age_mass / age_mass.sum() if age_mass.sum() else np.full(model.par.n, np.nan)
+    return distribution
+
 def _overview(models, periods, names, show_titles, age_start, show):
     fig, axes = plt.subplots(3, 2, figsize=(13, 11), layout="constrained")
     flat = axes.ravel()
@@ -298,10 +308,9 @@ def _overview(models, periods, names, show_titles, age_start, show):
         end = _last_period(model)
         mean_wages = [_weighted_mean(model.sol.wage[s], model.sol.mass[s]) for s in range(end + 1)]
         high_shares = [_weighted_mean(model.sol.l_h[s], model.sol.mass[s]) for s in range(end + 1)]
-        high_mass = _weights(model, t, "high")
-        high_mass = np.where(np.isfinite(high_mass) & (high_mass > 0), high_mass, 0)
-        age_mass = high_mass.sum(axis=1)
-        distribution = age_mass / age_mass.sum() if age_mass.sum() else np.full(model.par.n, np.nan)
+
+        distribution = _distribution_by_age(model, t, "high")
+
         flat[0].plot(mean_wages, lw=2, label=name, color=color)
         flat[1].plot(np.asarray(high_shares) * 100, lw=2, label=name, color=color)
         snapshot = f"{name}, period {t}" if name else f"Period {t}"
@@ -309,6 +318,7 @@ def _overview(models, periods, names, show_titles, age_start, show):
         flat[3].plot(ages, 100 * distribution, lw=2, label=snapshot, color=color)
         shares = _weighted_mean(model.sol.l_h[t], model.sol.mass[t], axis=1)
         flat[4].plot(ages, 100 * shares, lw=2, label=snapshot, color=color)
+        
         for skill, style in [("high", "-"), ("low", "--")]:
             flat[5].plot(ages, _mean_by_age(model, t, skill), style, lw=2,
                          color=color if len(models) > 1 else BLUE if skill == "high" else RED,
@@ -353,59 +363,77 @@ def plot_occupation_heatmaps(model, t_start=0, t_end=-1, age_start=None, *, show
     from matplotlib.colors import LinearSegmentedColormap
 
     age_start = _age_start(age_start)
+
     periods = (_period(model, t_start), _period(model, t_end))
     panels = []
     ability_grid = None
+
     for t in periods:
+
         ability = np.asarray(model.sol.ability[t])
         order = np.argsort(ability, axis=1)
         sorted_ability = np.take_along_axis(ability, order, axis=1)
+
         if ability_grid is None:
             ability_grid = sorted_ability[0]
+
         if (not np.all(np.isfinite(sorted_ability))
                 or not np.allclose(sorted_ability, ability_grid)
                 or np.any(np.diff(ability_grid) <= 0)):
             raise ValueError("Heatmaps require a common, distinct ability grid")
+
         share = np.take_along_axis(model.sol.l_h[t], order, axis=1)
         mass = np.take_along_axis(model.sol.mass[t], order, axis=1)
         valid = np.isfinite(share) & np.isfinite(mass) & (mass > 0)
+
         if not np.any(valid):
             raise ValueError(f"Period {t} has no job allocations with positive mass")
+
         panels.append(np.ma.array(np.clip(share, 0, 1), mask=~valid).T)
 
     # Use actual ability coordinates: the quantile grid is not equally spaced.
     if ability_grid.size == 1:
         half_width = max(abs(ability_grid[0]) * 0.01, 0.01)
         ability_edges = ability_grid[0] + np.array([-half_width, half_width])
+
     else:
         midpoints = (ability_grid[:-1] + ability_grid[1:]) / 2
         ability_edges = np.r_[ability_grid[0] - (midpoints[0] - ability_grid[0]),
                               midpoints,
                               ability_grid[-1] + (ability_grid[-1] - midpoints[-1])]
+
     age_edges = age_start + np.arange(panels[0].shape[1] + 1) - 0.5
     cmap = LinearSegmentedColormap.from_list("low_to_high_job", ["#e53935", "#2166d1"])
     cmap.set_bad("#dddddd")
+
     fig, axes = plt.subplots(1, 3, figsize=(18, 5), sharex=True, sharey=True,
                              constrained_layout=True)
+
     for ax, t, panel in zip(axes, periods, panels):
         ax.grid(False)
         mesh = ax.pcolormesh(age_edges, ability_edges, panel, cmap=cmap,
                              vmin=0, vmax=1, shading="flat", rasterized=True)
         resolved_t = t if t >= 0 else model.sol.l_h.shape[0] + t
         _label(ax, f"Occupational allocation: period {resolved_t}", "Age", "", show_titles, grid=False)
+
     axes[0].set_ylabel("Ability")
-    colorbar = fig.colorbar(mesh, ax=axes[:2], ticks=[0, 0.5, 1],
-                           label="Share in high job")
+
+    colorbar = fig.colorbar(mesh, ax=axes[:2], ticks=[0, 0.5, 1], label="Share in high job")
     colorbar.ax.set_yticklabels(["0: low job", "0.5: split equally", "1: high job"])
     change = 100.0 * (panels[1] - panels[0])
+
     change_cmap = LinearSegmentedColormap.from_list(
         "job_share_change", ["#e53935", "#ffffff", "#2166d1"], N=257)
     change_cmap.set_bad("#dddddd")
+
     axes[2].grid(False)
+
     change_mesh = axes[2].pcolormesh(
         age_edges, ability_edges, change, cmap=change_cmap,
         vmin=-100, vmax=100, shading="flat", rasterized=True)
+
     _label(axes[2], "High-job share: final minus initial", "Age", "", show_titles, grid=False)
+
     fig.colorbar(change_mesh, ax=axes[2], ticks=[-100, -50, 0, 50, 100],
                  label="Change in high-job share (percentage points)")
     if show:
